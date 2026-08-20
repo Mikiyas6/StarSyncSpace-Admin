@@ -113,7 +113,7 @@ function BookingDataBox({ booking }) {
     totalPrice,
     observations,
     isPaid,
-    guests: { fullName: guestName, email, country, countryFlag, nationalID },
+    guests: { fullName: guestName, email, country, countryFlag },
     rooms: { name: roomName },
   } = booking;
 
@@ -145,8 +145,6 @@ function BookingDataBox({ booking }) {
           </p>
           <span>&bull;</span>
           <p>{email}</p>
-          <span>&bull;</span>
-          <p>National ID {nationalID}</p>
         </Guest>
 
         {observations && (

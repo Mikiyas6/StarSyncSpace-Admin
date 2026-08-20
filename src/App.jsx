@@ -16,6 +16,7 @@ import { Toaster } from "react-hot-toast";
 import Booking from "./pages/Booking";
 import Checkin from "./pages/Checkin";
 import ProtectedRoute from "./ui/ProtectedRoute";
+import ThemeProvider from "./context/ThemeProvider";
 
 /*
 - QueryClient is a data-management system for the entire application.
@@ -105,10 +106,9 @@ React Query immediately refetches fresh data after a mutation.
 
 function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-        {import.meta.env.DEV && (
-          <ReactQueryDevtools initialIsOpen={false} />
-        )}
+    <ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
         <GlobalStyles />
         {/* BrowserRouter is a component that allows you to manage the routing of your application. It is a wrapper that allows you to manage the routing of your application. */}
         <HashRouter>
@@ -158,6 +158,7 @@ function App() {
           }}
         />
       </QueryClientProvider>
+    </ThemeProvider>
   );
 }
 

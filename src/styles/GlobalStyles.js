@@ -60,6 +60,57 @@ const GlobalStyles = createGlobalStyle`
   
 }
 
+.dark {
+  color-scheme: dark;
+
+  /* Grey — pure black canvas, surfaces step up just slightly so cards
+     stay visible, text comes up light */
+    --color-grey-0: #0a0a0e;
+    --color-grey-50: #000000;
+    --color-grey-100: #14141c;
+    --color-grey-200: #1e1e28;
+    --color-grey-300: #2a2a35;
+    --color-grey-400: #585862;
+    --color-grey-500: #8a8a96;
+    --color-grey-600: #cbd5e1;
+    --color-grey-700: #e2e8f0;
+    --color-grey-800: #f1f5f9;
+    --color-grey-900: #f8fafc;
+
+  --color-blue-100: #0f1c2e;
+  --color-blue-700: #7cc3ee;
+  --color-green-100: #0a1f14;
+  --color-green-700: #63d697;
+  --color-yellow-100: #221a06;
+  --color-yellow-700: #f5c14c;
+  --color-coral-100: #24100b;
+  --color-coral-700: #ff9c8d;
+  --color-silver-100: #161b26;
+  --color-silver-700: #c6d0e0;
+  --color-indigo-100: #171d30;
+  --color-indigo-700: #c3cdf0;
+
+  /* Brand — inverted so primary buttons become light surfaces */
+  --color-brand-50: #0b1220;
+  --color-brand-100: #0f172a;
+  --color-brand-200: #1e293b;
+  --color-brand-500: #94a3b8;
+  --color-brand-600: #e2e8f0;
+  --color-brand-700: #f1f5f9;
+  --color-brand-800: #f8fafc;
+  --color-brand-900: #ffffff;
+
+  --color-red-100: #3a1416;
+  --color-red-700: #fda4a4;
+  --color-red-800: #fecaca;
+
+  --backdrop-color: rgba(0, 0, 0, 0.6);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0px 0.6rem 2.4rem rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 2.4rem 3.2rem rgba(0, 0, 0, 0.6);
+}
+
 *,
 *::before,
 *::after {
@@ -70,16 +121,19 @@ const GlobalStyles = createGlobalStyle`
 
 html {
   font-size: 62.5%;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 body {
   font-family: "Inter", sans-serif;
   color: var(--color-grey-700);
+  background-color: var(--color-grey-50);
 
   min-height: 100vh;
   line-height: 1.5;
   font-size: 1.6rem;
   -webkit-font-smoothing: antialiased;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 h1,

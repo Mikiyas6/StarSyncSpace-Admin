@@ -126,6 +126,27 @@ export async function getEndingSoonBookings() {
   return data;
 }
 
+// Bookings that are still active and will end within the next hour. Used by the
+// admin notification system to warn when a client has 10 minutes left to leave.
+export async function getActiveBookingsEndingSoon(windowMinutes = 60) {
+  const now = new Date();
+  const windowEnd = new Date(now.getTime() + windowMinutes * 60 * 1000).toISOString();
+
+  const { data, error } = await supabase
+    .from("bookings")
+    .select("*, rooms(name), guests(fullName)")
+    .or("status.eq.booked,status.eq.in-use")
+    .gte("endTime", now.toISOString())
+    .lte("endTime", windowEnd)
+    .order("endTime");
+
+  if (error) {
+    console.error(error);
+    throw new Error("Bookings could not get loaded");
+  }
+  return data;
+}
+
 export async function updateBooking(id, obj) {
   const { data, error } = await supabase
     .from("bookings")

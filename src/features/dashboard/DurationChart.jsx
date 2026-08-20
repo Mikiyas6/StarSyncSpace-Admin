@@ -61,9 +61,22 @@ const startData = [
   {
     duration: "8+ hrs",
     value: 0,
-    color: "#0f172a",
+    color: "#64748b",
   },
 ];
+
+const tooltipStyle = {
+  backgroundColor: "var(--color-grey-0)",
+  color: "var(--color-grey-700)",
+  border: "1px solid var(--color-grey-100)",
+  borderRadius: "var(--border-radius-sm)",
+  fontSize: "1.3rem",
+};
+
+const legendStyle = {
+  color: "var(--color-grey-600)",
+  fontSize: "1.3rem",
+};
 
 function prepareData(startData, stays) {
   function incArrayValue(arr, field) {
@@ -115,7 +128,7 @@ function DurationChart({ confirmedStays }) {
               />
             ))}
           </Pie>
-          <Tooltip />
+          <Tooltip contentStyle={tooltipStyle} />
           <Legend
             verticalAlign="middle"
             align="right"
@@ -123,6 +136,7 @@ function DurationChart({ confirmedStays }) {
             layout="vertical"
             iconSize={15}
             iconType="circle"
+            wrapperStyle={legendStyle}
           />
         </PieChart>
       </ResponsiveContainer>

@@ -39,9 +39,12 @@ function SalesChart({ bookings, startDate, endDate }) {
   });
 
   const colors = {
-    totalSales: { stroke: "#0f172a", fill: "#cbd5e1" },
-    text: "#334155",
-    background: "#fff",
+    totalSales: {
+      stroke: "var(--color-brand-600)",
+      fill: "var(--color-grey-200)",
+    },
+    text: "var(--color-grey-600)",
+    background: "var(--color-grey-0)",
   };
 
   return (

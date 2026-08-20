@@ -19,6 +19,17 @@
       content="StarSyncSpace admin — manage rooms, bookings, and availability"
     />
     <title>StarSyncSpace Admin</title>
+    <script>
+      (function () {
+        try {
+          var s = localStorage.getItem("syncspace-theme");
+          var dark = s
+            ? s === "dark"
+            : window.matchMedia("(prefers-color-scheme: dark)").matches;
+          if (dark) document.documentElement.classList.add("dark");
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <!-- 

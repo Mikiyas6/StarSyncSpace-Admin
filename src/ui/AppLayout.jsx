@@ -2,6 +2,7 @@ import { Outlet } from "react-router-dom";
 import Sidebar from "./Sidebar";
 import Header from "./Header";
 import styled from "styled-components";
+import { NotificationsProvider } from "../features/check-in-out/NotificationsContext";
 
 const StyledAppLayout = styled.div`
   display: grid;
@@ -26,15 +27,17 @@ const Container = styled.div`
 
 function AppLayout() {
   return (
-    <StyledAppLayout>
-      <Sidebar />
-      <Header />
-      <Main>
-        <Container>
-          <Outlet />
-        </Container>
-      </Main>
-    </StyledAppLayout>
+    <NotificationsProvider>
+      <StyledAppLayout>
+        <Sidebar />
+        <Header />
+        <Main>
+          <Container>
+            <Outlet />
+          </Container>
+        </Main>
+      </StyledAppLayout>
+    </NotificationsProvider>
   );
 }
 
