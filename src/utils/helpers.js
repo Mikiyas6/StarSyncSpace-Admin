@@ -30,6 +30,19 @@ export const formatCurrency = (value) =>
     value
   );
 
+// Rooms store one price — USD per HOUR (rooms.regularPrice) — and the
+// client derives what the customer actually sees (per-minute, in RWF) from
+// it, so admin only ever edits a single number per room. Kept in sync with
+// RWF_PER_USD in StarSyncSpace-Client/app/_lib/availability.js.
+export const RWF_PER_USD = 1470.59;
+
+// Takes a USD-per-MINUTE rate (divide the hourly regularPrice by 60 first)
+// and formats its RWF equivalent.
+export const formatRwfPerMinute = (usdPerMinute) =>
+  `${Math.round((Number(usdPerMinute) || 0) * RWF_PER_USD).toLocaleString(
+    "en-US"
+  )} RWF`;
+
 // Menu prices are stored numerically with their own currency column (RWF by
 // default). Format as "12,000 RWF" so the display never depends on locale.
 export const formatMenuPrice = (value, currency = "RWF") => {

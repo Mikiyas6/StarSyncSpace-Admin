@@ -1,5 +1,5 @@
 import styled from "styled-components";
-import { formatCurrency } from "../../utils/helpers";
+import { formatCurrency, formatRwfPerMinute } from "../../utils/helpers";
 import CreateRoomForm from "./CreateRoomForm";
 import { useDeleteRoom } from "./useDeleteRoom";
 import { Copy, Pencil, Trash2 } from "lucide-react";
@@ -29,6 +29,13 @@ const Room = styled.div`
 const Price = styled.div`
   font-family: "Space Grotesk";
   font-weight: 600;
+`;
+
+const PriceRwf = styled.div`
+  font-family: "Space Grotesk";
+  font-weight: 500;
+  font-size: 1.2rem;
+  color: var(--color-grey-500);
 `;
 
 const Discount = styled.div`
@@ -63,7 +70,10 @@ function RoomRow({ room }) {
       <img src={image} alt="" />
       <Room>{name}</Room>
       <div>Fits up to {maxCapacity} guests</div>
-      <Price>{formatCurrency(regularPrice)}</Price>
+      <div>
+        <Price>{formatCurrency(regularPrice / 60)}/min</Price>
+        <PriceRwf>{formatRwfPerMinute(regularPrice / 60)}/min</PriceRwf>
+      </div>
       {discount ? (
         <Discount>{formatCurrency(discount)}</Discount>
       ) : (

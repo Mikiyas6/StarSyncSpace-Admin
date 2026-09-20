@@ -9,6 +9,7 @@ import { useForm } from "react-hook-form";
 import { useCreateRoom } from "./useCreateRoom";
 import { useEditRoom } from "./useEditRoom";
 import RoomImagesManager from "./RoomImagesManager";
+import { formatRwfPerMinute } from "../../utils/helpers";
 const FormRow = styled.div`
   display: grid;
   align-items: center;
@@ -44,16 +45,23 @@ const Error = styled.span`
   font-size: 1.4rem;
   color: var(--color-red-700);
 `;
+
+const Hint = styled.span`
+  font-size: 1.4rem;
+  color: var(--color-grey-500);
+`;
 function CreateRoomForm({ roomToEdit = {}, onCloseModal }) {
   const { id: editId, ...editValues } = roomToEdit;
   const isEditSession = Boolean(editId);
   const { isEditing, editRoom } = useEditRoom();
   const { isCreating, createRoom } = useCreateRoom();
   const isWorking = isCreating || isEditing;
-  const { register, handleSubmit, reset, getValues, formState } = useForm({
-    defaultValues: isEditSession ? editValues : {},
-  });
+  const { register, handleSubmit, reset, getValues, watch, formState } =
+    useForm({
+      defaultValues: isEditSession ? editValues : {},
+    });
   const { errors } = formState;
+  const watchedPrice = watch("regularPrice");
 
   function onSubmit(data) {
     const image = typeof data.image === "string" ? data.image : data.image[0];
@@ -114,17 +122,27 @@ function CreateRoomForm({ roomToEdit = {}, onCloseModal }) {
       </FormRow>
       <FormRow>
         <label htmlFor="regularPrice">
-          Hourly price (clients pay the flat $0.70/min)
+          Price per hour (USD) — clients are billed per minute, converted to
+          RWF automatically
         </label>
         <Input
           disabled={isWorking}
           type="number"
+          step="0.01"
           id="regularPrice"
-          {...register("regularPrice", { required: "This field is required" })}
+          {...register("regularPrice", {
+            required: "This field is required",
+            min: { value: 0.01, message: "Price must be greater than 0" },
+          })}
         />
-        {errors?.regularPrice?.message && (
+        {errors?.regularPrice?.message ? (
           <Error>{errors.regularPrice.message}</Error>
-        )}
+        ) : watchedPrice ? (
+          <Hint>
+            ≈ ${(watchedPrice / 60).toFixed(2)}/min ·{" "}
+            {formatRwfPerMinute(watchedPrice / 60)}/min
+          </Hint>
+        ) : null}
       </FormRow>
       <FormRow>
         <label htmlFor="discount">Discount</label>
