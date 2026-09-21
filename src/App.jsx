@@ -31,9 +31,15 @@ const queryClient = new QueryClient({
   // Allows you to configure the default behavior of queries in React Query.
   defaultOptions: {
     queries: {
-      // staleTime: 60 * 1000,
-      staleTime: 20000,
-      refetchOnWindowFocus: false,
+      // staleTime: 0 means every mount/focus/reconnect triggers a background
+      // refetch, so any change made elsewhere (another tab, another admin,
+      // a direct DB edit) shows up after a single navigation or reload.
+      // React Query still renders the cached data instantly first, so this
+      // costs a background request, not a loading spinner.
+      staleTime: 0,
+      refetchOnMount: "always",
+      refetchOnWindowFocus: true,
+      refetchOnReconnect: true,
       retry: 1,
       /*
 Purpose: The amount of time that the data in the cache will stay fresh or will stay valid until it is fetched again by React Query

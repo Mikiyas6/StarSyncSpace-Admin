@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { createEditRoom } from "../../services/apiRooms";
+import { revalidateClientSite } from "../../services/revalidateClientSite";
 
 export function useCreateRoom() {
   const queryClient = useQueryClient();
@@ -11,6 +12,7 @@ export function useCreateRoom() {
       queryClient.invalidateQueries({
         queryKey: ["rooms"],
       });
+      revalidateClientSite(["/", "/rooms"]);
     },
     onError: (error) => {
       toast.error("Failed to create room: " + error.message);
