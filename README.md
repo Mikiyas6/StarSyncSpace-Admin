@@ -4,13 +4,13 @@ Admin dashboard for **SyncSpace** — bookable meeting rooms by the hour. Built 
 
 ## Overview
 
-| Area | Stack |
-| --- | --- |
-| UI | React 18, Vite, styled-components |
-| Data | @tanstack/react-query, Supabase (Postgres + Storage + Auth) |
-| Routing | react-router-dom (hash router) |
-| Charts | recharts |
-| Forms | react-hook-form, react-hot-toast |
+| Area    | Stack                                                       |
+| ------- | ----------------------------------------------------------- |
+| UI      | React 18, Vite, styled-components                           |
+| Data    | @tanstack/react-query, Supabase (Postgres + Storage + Auth) |
+| Routing | react-router-dom (hash router)                              |
+| Charts  | recharts                                                    |
+| Forms   | react-hook-form, react-hot-toast                            |
 
 ## Getting started
 
@@ -39,5 +39,3 @@ The client reads `SUPABASE_URL` and `SUPABASE_KEY` from `.env.local` (see `src/s
 ## Database
 
 Tables used: `rooms`, `bookings`, `guests`, `admins`, `room_images`, `settings`. Bookings are hour-based (`startTime` / `endTime` / `numHours`); overlapping rows are prevented by the `no_overlapping_bookings` exclusion constraint (except `cancelled` / `no-show`).
-
-The commented-out `Uploader` in `src/ui/Sidebar.jsx` can reseed sample data.
