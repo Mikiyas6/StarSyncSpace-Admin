@@ -230,21 +230,30 @@ export function validateAdminBooking({
   ignoreBookingId = null,
   now = new Date(),
 }) {
-  if (!room) return { error: "Pick a room" };
+  /* Every rejection carries the `field` it belongs to, so the form can
+     put the message under the control that caused it instead of making
+     the admin guess which of six inputs a lone red line refers to. */
+  if (!room) return { error: "Pick a room", field: "room" };
   if (!(start instanceof Date) || Number.isNaN(start.getTime()))
-    return { error: "Pick a valid start date and time" };
+    return { error: "Pick a valid start date and time", field: "start" };
 
   const minutes = Number(durationMinutes);
   if (!Number.isFinite(minutes) || minutes <= 0)
-    return { error: "Pick how long the booking runs for" };
+    return { error: "Pick how long the booking runs for", field: "duration" };
 
   const minMinutes = Number(settings.min_booking_duration_minutes) || 15;
   const maxMinutes =
     Number(settings.max_booking_duration_minutes) || FULL_DAY_MINUTES;
   if (minutes < minMinutes)
-    return { error: `Bookings must be at least ${minMinutes} minutes long` };
+    return {
+      error: `Bookings must be at least ${formatDuration(minMinutes)} long`,
+      field: "duration",
+    };
   if (minutes > maxMinutes)
-    return { error: `Bookings cannot exceed ${maxMinutes} minutes` };
+    return {
+      error: `Bookings cannot be longer than ${formatDuration(maxMinutes)}`,
+      field: "duration",
+    };
 
   const end = new Date(start.getTime() + minutes * MINUTE_MS);
 
@@ -253,6 +262,7 @@ export function validateAdminBooking({
       error: `That runs outside opening hours (${
         settings.business_hours_start ?? "00:00"
       }–${settings.business_hours_end ?? "23:59"})`,
+      field: "start",
     };
 
   const gapMinutes =
@@ -261,7 +271,8 @@ export function validateAdminBooking({
     conflictsWithBookings(start, end, existingBookings, gapMinutes, ignoreBookingId)
   )
     return {
-      error: `That clashes with another booking for this room (rooms need ${gapMinutes} minutes to turn around between bookings)`,
+      error: `That clashes with another booking for this room — rooms need ${gapMinutes} minutes to turn around in between`,
+      field: "start",
     };
 
   const usdPerMinute = usdPerMinuteFromRoom(room);

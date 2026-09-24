@@ -270,7 +270,7 @@ describe("validateAdminBooking", () => {
     ).toMatch(/valid start/i);
   });
 
-  it("honours the configured minimum and maximum", () => {
+  it("honours the configured minimum and maximum, in words a person reads", () => {
     const settings = {
       ...OPEN_24_7,
       min_booking_duration_minutes: 60,
@@ -279,11 +279,60 @@ describe("validateAdminBooking", () => {
     expect(
       validateAdminBooking({ start: NOW, durationMinutes: 30, room: ROOM, settings })
         .error,
-    ).toMatch(/at least 60/);
+    ).toMatch(/at least 1 hr/);
     expect(
       validateAdminBooking({ start: NOW, durationMinutes: 300, room: ROOM, settings })
         .error,
-    ).toMatch(/cannot exceed 240/);
+    ).toMatch(/longer than 4 hrs/);
+  });
+
+  it("names the field each rejection belongs to, so the form can point at it", () => {
+    const base = { durationMinutes: 60, room: ROOM, settings: OPEN_24_7, now: NOW };
+
+    expect(validateAdminBooking({ ...base, room: null, start: NOW }).field).toBe(
+      "room",
+    );
+    expect(
+      validateAdminBooking({ ...base, start: new Date("nonsense") }).field,
+    ).toBe("start");
+    expect(
+      validateAdminBooking({ ...base, start: NOW, durationMinutes: 0 }).field,
+    ).toBe("duration");
+    expect(
+      validateAdminBooking({
+        ...base,
+        start: NOW,
+        durationMinutes: 5000,
+      }).field,
+    ).toBe("duration");
+    expect(
+      validateAdminBooking({
+        ...base,
+        start: at("13:00"),
+        existingBookings: [existing("13:00", "14:00")],
+      }).field,
+    ).toBe("start");
+    expect(
+      validateAdminBooking({
+        ...base,
+        start: at("19:00"),
+        durationMinutes: 180,
+        settings: OFFICE_HOURS,
+      }).field,
+    ).toBe("start");
+  });
+
+  it("leaves `field` unset when the booking is fine", () => {
+    const ok = validateAdminBooking({
+      start: at("13:00"),
+      durationMinutes: 60,
+      room: ROOM,
+      settings: OPEN_24_7,
+      existingBookings: [],
+      now: NOW,
+    });
+    expect(ok.error).toBeUndefined();
+    expect(ok.field).toBeUndefined();
   });
 });
 
@@ -308,25 +357,25 @@ describe("clash detection", () => {
   }
 
   it("refuses an identical slot", () => {
-    expect(verdict("13:00", [existing("13:00", "14:00")]).error).toMatch(/clash/i);
+    expect(verdict("13:00", [existing("13:00", "14:00")]).error).toMatch(/clashes with another booking/i);
   });
 
   it("refuses a slot that starts inside another", () => {
-    expect(verdict("13:30", [existing("13:00", "14:00")]).error).toMatch(/clash/i);
+    expect(verdict("13:30", [existing("13:00", "14:00")]).error).toMatch(/clashes with another booking/i);
   });
 
   it("refuses a slot that ends inside another", () => {
-    expect(verdict("12:30", [existing("13:00", "14:00")]).error).toMatch(/clash/i);
+    expect(verdict("12:30", [existing("13:00", "14:00")]).error).toMatch(/clashes with another booking/i);
   });
 
   it("refuses a slot that swallows another whole", () => {
     expect(
       verdict("12:00", [existing("13:00", "14:00")], { durationMinutes: 180 }).error,
-    ).toMatch(/clash/i);
+    ).toMatch(/clashes with another booking/i);
   });
 
   it("refuses a slot inside the turnaround window", () => {
-    expect(verdict("14:10", [existing("13:00", "14:00")]).error).toMatch(/clash/i);
+    expect(verdict("14:10", [existing("13:00", "14:00")]).error).toMatch(/clashes with another booking/i);
   });
 
   it("accepts a slot starting exactly when the turnaround ends", () => {
@@ -349,7 +398,7 @@ describe("clash detection", () => {
   it("is blocked by someone else's pending payment hold", () => {
     expect(
       verdict("13:00", [existing("13:00", "14:00", { status: "pending" })]).error,
-    ).toMatch(/clash/i);
+    ).toMatch(/clashes with another booking/i);
   });
 
   it("catches a clash a 24-hour booking makes on the FOLLOWING day", () => {
@@ -364,7 +413,7 @@ describe("clash detection", () => {
     expect(
       verdict("10:00", [tomorrowMorning], { durationMinutes: FULL_DAY_MINUTES })
         .error,
-    ).toMatch(/clash/i);
+    ).toMatch(/clashes with another booking/i);
   });
 
   it("catches a clash against a 24-hour booking already in place", () => {
@@ -374,7 +423,7 @@ describe("clash detection", () => {
       endTime: at("10:00", 1).toISOString(),
       status: "booked",
     };
-    expect(verdict("23:00", [allDay]).error).toMatch(/clash/i);
+    expect(verdict("23:00", [allDay]).error).toMatch(/clashes with another booking/i);
     expect(verdict("09:00", [allDay]).error).toBeUndefined();
   });
 
@@ -389,7 +438,7 @@ describe("clash detection", () => {
   it("respects a turnaround window the admin has changed", () => {
     const wide = { ...OPEN_24_7, booking_buffer_minutes: 60 };
     expect(verdict("14:30", [existing("13:00", "14:00")], { settings: wide }).error)
-      .toMatch(/clash/i);
+      .toMatch(/clashes with another booking/i);
     expect(verdict("15:00", [existing("13:00", "14:00")], { settings: wide }).error)
       .toBeUndefined();
   });
