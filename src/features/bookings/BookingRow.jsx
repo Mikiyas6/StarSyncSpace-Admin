@@ -7,13 +7,28 @@ import Table from "../../ui/Table";
 import { formatCurrency } from "../../utils/helpers";
 import { formatDistanceFromNow } from "../../utils/helpers";
 import Menus from "../../ui/Menus";
-import { CalendarCheck, CircleCheckBig, Eye, Trash2 } from "lucide-react";
+import {
+  BadgeDollarSign,
+  CalendarCheck,
+  CircleCheckBig,
+  CircleX,
+  Eye,
+  Trash2,
+  UserX,
+} from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useCheckout } from "../check-in-out/useCheckout";
 import { useDeleteBooking } from "../rooms/useDeleteBooking";
 import Modal from "../../ui/Modal";
 import ConfirmDelete from "../../ui/ConfirmDelete";
 import ConfirmComplete from "../../ui/ConfirmComplete";
+import {
+  bookingMinutes,
+  formatDuration,
+  statusLabel,
+  statusTag,
+} from "../../utils/booking";
+import { useSetBookingPaid, useSetBookingStatus } from "./useBookingStatus";
 
 const Room = styled.div`
   font-size: 1.6rem;
@@ -52,17 +67,11 @@ function BookingRow({
     numGuests,
     totalPrice,
     status,
+    isPaid,
     guests,
     rooms,
   } = {},
 }) {
-  const statusToTagName = {
-    booked: "yellow",
-    "in-use": "coral",
-    completed: "green",
-    cancelled: "silver",
-    "no-show": "coral",
-  };
 
   // Safely access nested properties
   const guestName = guests?.fullName || "Guest not found";
@@ -70,7 +79,20 @@ function BookingRow({
   const roomName = rooms?.name || "Room not found";
   const navigate = useNavigate();
   const { checkout, isCheckingOut } = useCheckout();
-  const { isDeleting, deleteBooking } = useDeleteBooking();
+  // useDeleteBooking exports `isDeletingBooking`. This used to destructure
+  // `isDeleting`, which is simply not a key it returns — so the confirm
+  // button was never disabled and a second click fired a second delete.
+  const { isDeletingBooking, deleteBooking } = useDeleteBooking();
+  const { changeStatus, isChangingStatus } = useSetBookingStatus();
+  const { setPaid, isSettingPaid } = useSetBookingPaid();
+
+  const hasStarted = new Date(startTime) <= new Date();
+  const isClosed =
+    status === "completed" || status === "cancelled" || status === "no-show";
+  // Cancelled and no-show are the desk's own verdicts; "completed" is
+  // usually just the clock's, so it does not close the door on no-show.
+  const isClosedByDesk = status === "cancelled" || status === "no-show";
+
   function handleComplete() {
     checkout({ bookingId });
   }
@@ -91,7 +113,7 @@ function BookingRow({
           {isToday(new Date(startTime))
             ? "Today"
             : formatDistanceFromNow(startTime)}{" "}
-          &rarr; {numHours} hour{numHours !== 1 ? "s" : ""}
+          &rarr; {formatDuration(bookingMinutes({ startTime, endTime, numHours }))}
         </span>
         <span>
           {format(new Date(startTime), "EEE MMM dd, HH:mm")} &mdash;{" "}
@@ -99,9 +121,11 @@ function BookingRow({
         </span>
       </Stacked>
 
-      <Tag type={statusToTagName[status]}>
-        {status?.replace("-", " ") || "unknown"}
-      </Tag>
+      {/* statusTag() falls back to a real colour for any status the map
+          does not know. The inline map here had no entry for "pending" or
+          "failed", so those rows rendered var(--color-undefined-700) —
+          an invalid custom property, i.e. an unstyled tag. */}
+      <Tag type={statusTag(status)}>{statusLabel(status)}</Tag>
 
       <Amount>{formatCurrency(totalPrice)}</Amount>
       <Modal>
@@ -122,7 +146,7 @@ function BookingRow({
                 Mark in use
               </Menus.Button>
             )}
-{status === "in-use" && (
+            {status === "in-use" && (
               <Modal.Open opens="confirmComplete">
                 <Menus.Button
                   icon={<CircleCheckBig />}
@@ -131,6 +155,43 @@ function BookingRow({
                   Complete
                 </Menus.Button>
               </Modal.Open>
+            )}
+            {!isPaid && !isClosed && (
+              <Menus.Button
+                icon={<BadgeDollarSign />}
+                disabled={isSettingPaid}
+                onClick={() => setPaid({ bookingId, isPaid: true })}
+              >
+                Mark paid
+              </Menus.Button>
+            )}
+            {/* Cancel is for a booking called off BEFORE it started;
+                no-show for one nobody turned up to. Neither is ever set
+                automatically, and until now neither could be set at all. */}
+            {!hasStarted && !isClosed && (
+              <Menus.Button
+                icon={<CircleX />}
+                disabled={isChangingStatus}
+                onClick={() => changeStatus({ bookingId, status: "cancelled" })}
+              >
+                Cancel booking
+              </Menus.Button>
+            )}
+            {/* No-show stays available for any booking that has started,
+                not just a 'booked' one. The reconciler advances a started
+                booking to "in-use" within a minute of its start time — and
+                that is an ASSUMPTION from the clock, not an observation. If
+                it also hid this button, the desk could never record that
+                nobody actually turned up, because the automation would
+                always get there first. */}
+            {hasStarted && !isClosedByDesk && (
+              <Menus.Button
+                icon={<UserX />}
+                disabled={isChangingStatus}
+                onClick={() => changeStatus({ bookingId, status: "no-show" })}
+              >
+                Mark no-show
+              </Menus.Button>
             )}
             <Modal.Open opens="deleteBooking">
               <Menus.Button icon={<Trash2 />}>Delete</Menus.Button>
@@ -147,7 +208,7 @@ function BookingRow({
         <Modal.Window name="deleteBooking">
           <ConfirmDelete
             resourceName="booking"
-            disabled={isDeleting}
+            disabled={isDeletingBooking}
             onConfirm={handleDelete}
           />
         </Modal.Window>

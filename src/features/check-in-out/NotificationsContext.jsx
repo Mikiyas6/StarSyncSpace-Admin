@@ -72,7 +72,13 @@ function NotificationsProvider({ children }) {
 
   const { data } = useQuery({
     queryKey: ["room-leaving-notifications"],
-    queryFn: getActiveBookingsEndingSoon,
+    /* Must be wrapped. React Query calls queryFn with a CONTEXT OBJECT
+       ({ queryKey, signal, meta }), so passing the function bare handed
+       that object to getActiveBookingsEndingSoon's `windowMinutes`
+       parameter. object * 60000 is NaN, new Date(NaN).toISOString()
+       throws, and the query rejected on every single poll — which is
+       why the "10 minutes left" warnings never appeared. */
+    queryFn: () => getActiveBookingsEndingSoon(),
     refetchInterval: POLL_INTERVAL,
   });
 

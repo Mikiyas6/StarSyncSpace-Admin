@@ -52,8 +52,13 @@ const StyledButton = styled.button`
   align-items: center;
   gap: 1.6rem;
 
-  &:hover {
+  &:hover:not(:disabled) {
     background-color: var(--color-grey-50);
+  }
+
+  &:disabled {
+    color: var(--color-grey-400);
+    cursor: not-allowed;
   }
 
   & svg {
@@ -61,6 +66,10 @@ const StyledButton = styled.button`
     height: 1.6rem;
     color: var(--color-grey-400);
     transition: all 0.3s;
+  }
+
+  &:disabled svg {
+    color: var(--color-grey-300);
   }
 `;
 
@@ -104,16 +113,21 @@ function List({ id, children }) {
     document.body
   );
 }
-function Button({ id, children, icon, onClick }) {
+/* `disabled` used to be accepted by every caller and forwarded by none —
+   BookingRow has passed it since it was written — so a menu action that
+   was already in flight stayed clickable and a second click fired a
+   second mutation. It is a real prop now. */
+function Button({ id, children, icon, onClick, disabled = false }) {
   const { close } = useContext(MenusContext);
   function handleClick(e) {
     e.stopPropagation();
+    if (disabled) return;
     onClick?.();
     close();
   }
   return (
     <li id={id}>
-      <StyledButton onClick={handleClick}>
+      <StyledButton onClick={handleClick} disabled={disabled}>
         {icon}
         <span> {children}</span>
       </StyledButton>

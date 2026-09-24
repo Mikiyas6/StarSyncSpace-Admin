@@ -5,9 +5,12 @@ import {
   CalendarClock,
   LayoutDashboard,
   Settings2,
+  Star,
   Users,
   UtensilsCrossed,
 } from "lucide-react";
+
+import { usePendingReviewCount } from "../features/reviews/usePendingReviewCount";
 
 const NavList = styled.ul`
   display: flex;
@@ -53,7 +56,21 @@ const StyledNavLink = styled(NavLink)`
   }
 `;
 
+const PendingBadge = styled.span`
+  margin-left: auto;
+  min-width: 2.2rem;
+  padding: 0.2rem 0.7rem;
+  border-radius: 100px;
+  background-color: var(--color-yellow-100);
+  color: var(--color-yellow-700);
+  font-size: 1.2rem;
+  font-weight: 600;
+  text-align: center;
+`;
+
 function MainNav() {
+  const { pendingCount } = usePendingReviewCount();
+
   return (
     <nav>
       <NavList>
@@ -91,6 +108,16 @@ function MainNav() {
           <StyledNavLink to="/menu">
             <UtensilsCrossed />
             <span>Menu</span>
+          </StyledNavLink>
+        </li>
+        <li>
+          <StyledNavLink to="/reviews">
+            <Star />
+            <span>Reviews</span>
+            {/* Reviews are invisible to the public until someone acts on
+                them, so an unread queue is a guest waiting. The count is
+                the only thing that makes anyone open this page. */}
+            {pendingCount > 0 ? <PendingBadge>{pendingCount}</PendingBadge> : null}
           </StyledNavLink>
         </li>
       </NavList>

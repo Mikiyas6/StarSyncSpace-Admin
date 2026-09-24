@@ -15,6 +15,13 @@ const StyledModal = styled.div`
   box-shadow: var(--shadow-lg);
   padding: 3.2rem 4rem;
   transition: all 0.5s;
+
+  /* A form taller than the window used to run off the top and bottom
+     with nothing to scroll — the new booking form is long enough to hit
+     this on a laptop screen, and its Create button was unreachable. */
+  max-height: 90vh;
+  max-width: 95vw;
+  overflow-y: auto;
 `;
 
 const Overlay = styled.div`
@@ -80,7 +87,13 @@ function Open({ children, opens: opensWindowName }) {
 // 3.2. Create a child component that will be used to close the modal
 function Window({ children, name }) {
   const { openName, close } = useContext(ModalContext);
-  const { ref } = useOutsideClick({ close });
+  /* Two mistakes in one line, previously:
+     useOutsideClick returns the ref ITSELF, not { ref }, so destructuring
+     left ref undefined and StyledModal below got ref={undefined}; and the
+     hook's first argument is the HANDLER, so passing { close } handed it
+     an object to call. The hook's own `if (ref.current && handler)` guard
+     swallowed both, so clicking the backdrop silently did nothing. */
+  const ref = useOutsideClick(close);
   if (name !== openName) return null;
 
   return createPortal(

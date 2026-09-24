@@ -8,9 +8,9 @@ import {
 } from "lucide-react";
 
 import DataItem from "../../ui/DataItem";
-import { Flag } from "../../ui/Flag";
 
 import { formatDistanceFromNow, formatCurrency } from "../../utils/helpers";
+import { bookingMinutes, formatDuration } from "../../utils/booking";
 
 const StyledBookingDataBox = styled.section`
   /* Box */
@@ -107,13 +107,15 @@ function BookingDataBox({ booking }) {
     created_at,
     startTime,
     endTime,
-    numHours,
     numGuests,
     cabinPrice,
     totalPrice,
     observations,
     isPaid,
-    guests: { fullName: guestName, email, country, countryFlag },
+    // No country/countryFlag: the guests table is (id, created_at,
+    // fullName, email) and never had them, so the flag this used to try
+    // to render was always undefined.
+    guests: { fullName: guestName, email },
     rooms: { name: roomName },
   } = booking;
 
@@ -123,7 +125,7 @@ function BookingDataBox({ booking }) {
         <div>
           <Building2 />
           <p>
-            {numHours} hour{numHours !== 1 ? "s" : ""} in Room{" "}
+            {formatDuration(bookingMinutes(booking))} in Room{" "}
             <span>{roomName}</span>
           </p>
         </div>
@@ -139,7 +141,6 @@ function BookingDataBox({ booking }) {
 
       <Section>
         <Guest>
-          {/* {countryFlag && <Flag src={countryFlag} alt={`Flag of ${country}`} />} */}
           <p>
             {guestName} {numGuests > 1 ? `+ ${numGuests - 1} guests` : ""}
           </p>
@@ -160,9 +161,9 @@ function BookingDataBox({ booking }) {
         <Price isPaid={isPaid}>
           <DataItem icon={<CircleDollarSign />} label={`Total price`}>
             {formatCurrency(totalPrice)}
-            {` (${formatCurrency(cabinPrice)} room × ${numHours} hour${
-              numHours !== 1 ? "s" : ""
-            })`}
+            {` (${formatCurrency(cabinPrice)} room × ${formatDuration(
+              bookingMinutes(booking),
+            ).toLowerCase()})`}
           </DataItem>
 
           <p>{isPaid ? "Paid" : "Payment pending"}</p>

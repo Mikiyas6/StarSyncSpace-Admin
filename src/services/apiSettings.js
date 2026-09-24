@@ -17,6 +17,11 @@ export async function updateSetting(newSetting) {
     .update(newSetting)
     // There is only ONE row of settings, and it has the ID=1, and so this is the updated one
     .eq("id", 1)
+    // .single() without .select() asks PostgREST for one object back from a
+    // response the update was never told to produce, which is how you get
+    // "JSON object requested, multiple (or no) rows returned" out of a write
+    // that actually succeeded.
+    .select()
     .single();
 
   if (error) {

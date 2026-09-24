@@ -7,13 +7,19 @@ function BookingTableOperations() {
     <TableOperations>
       <Filter
         filterField="status"
+        /* "pending" and "failed" were missing, so payment holds and
+           failed payments were unreachable from this dashboard even
+           though a pending hold BLOCKS the room — the only way to see
+           why a room looked busy was to read the database. */
         options={[
           { value: "all", label: "All" },
+          { value: "pending", label: "Pending payment" },
           { value: "booked", label: "Booked" },
           { value: "in-use", label: "In use" },
           { value: "completed", label: "Completed" },
           { value: "cancelled", label: "Cancelled" },
           { value: "no-show", label: "No-show" },
+          { value: "failed", label: "Payment failed" },
         ]}
       />
 

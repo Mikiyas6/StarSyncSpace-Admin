@@ -13,6 +13,7 @@ import { useMoveBack } from "../../hooks/useMoveBack";
 import { useEffect } from "react";
 import { useCheckin } from "./useCheckin";
 import { formatCurrency } from "../../utils/helpers";
+import Empty from "../../ui/Empty";
 
 const Box = styled.div`
   /* Box */
@@ -30,11 +31,22 @@ function CheckinBooking() {
 
   const { checkin, isCheckingIn } = useCheckin();
   if (isLoading) return <Spinner />;
-  const { id: bookingId, guests, totalPrice } = booking;
+  if (!booking) return <Empty resourceName="booking" />;
+
+  const { id: bookingId, guests, totalPrice, status } = booking;
+
+  /* Statuses now advance on their own at the start time (see
+     useReconcileStatuses), so by the time the desk opens this page a
+     booking can already be "in use" — and then marking it in use again
+     is a no-op that hides the one thing this page is actually for, which
+     is recording that the money arrived. So the confirm-paid step stands
+     on its own, and the status change only happens when there is a
+     status change to make. */
+  const alreadyRunning = status !== "booked";
 
   function handleCheckin() {
     if (!confirmPaid) return;
-    checkin({ bookingId });
+    checkin({ bookingId, alreadyRunning });
   }
 
   return (
@@ -58,7 +70,9 @@ function CheckinBooking() {
       </Box>
       <ButtonGroup>
         <Button onClick={handleCheckin} disabled={!confirmPaid || isCheckingIn}>
-          Mark booking #{bookingId} in use
+          {alreadyRunning
+            ? `Confirm payment for booking #${bookingId}`
+            : `Mark booking #${bookingId} in use`}
         </Button>
         <Button variation="secondary" onClick={moveBack}>
           Back

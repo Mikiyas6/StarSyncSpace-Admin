@@ -2,6 +2,7 @@ import styled from "styled-components";
 import Tag from "../../ui/Tag";
 import Button from "../../ui/Button";
 import { Link } from "react-router-dom";
+import { bookingMinutes, formatDuration } from "../../utils/booking";
 const StyledTodayItem = styled.li`
   display: grid;
   grid-template-columns: 9rem 1fr 6rem 10rem;
@@ -25,13 +26,13 @@ const Guest = styled.div`
   white-space: nowrap;
 `;
 function TodayItem({ activity }) {
-  const { id, status, guests, numHours } = activity;
+  const { id, status, guests } = activity;
   return (
     <StyledTodayItem>
       {status === "booked" && <Tag type="yellow">Arriving</Tag>}
       {status === "in-use" && <Tag type="coral">Leaving</Tag>}
       <Guest>{guests?.fullName}</Guest>
-      <div>{numHours} hrs</div>
+      <div>{formatDuration(bookingMinutes(activity))}</div>
       {status === "booked" && (
         <Button
           size="small"

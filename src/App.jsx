@@ -7,6 +7,7 @@ import Rooms from "./pages/Rooms";
 import Users from "./pages/Users";
 import Settings from "./pages/Settings";
 import Menu from "./pages/Menu";
+import Reviews from "./pages/Reviews";
 import Account from "./pages/Account";
 import Login from "./pages/Login";
 import PageNotFound from "./pages/PageNotFound";
@@ -135,6 +136,7 @@ function App() {
               <Route path="users" element={<Users />} />
               <Route path="settings" element={<Settings />} />
               <Route path="menu" element={<Menu />} />
+              <Route path="reviews" element={<Reviews />} />
               <Route path="account" element={<Account />} />
             </Route>
             <Route path="login" element={<Login />} />

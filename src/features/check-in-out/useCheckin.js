@@ -8,13 +8,20 @@ export function useCheckin() {
   const navigate = useNavigate();
   const { mutate: checkin, isLoading: isCheckingIn } = useMutation({
     queryKey: ["checkin"],
-    mutationFn: ({ bookingId }) =>
-      updateBooking(bookingId, {
-        status: "in-use",
-        isPaid: true,
-      }),
+    // A booking that already started has been moved to "in-use" by the
+    // reconciler; forcing the status back would be wrong for one that has
+    // meanwhile finished. Only the payment flag is unconditional here.
+    mutationFn: ({ bookingId, alreadyRunning = false }) =>
+      updateBooking(
+        bookingId,
+        alreadyRunning ? { isPaid: true } : { status: "in-use", isPaid: true },
+      ),
     onSuccess: (data) => {
-      toast.success(`Booking #${data.id} is now in use`);
+      toast.success(
+        data.status === "in-use"
+          ? `Booking #${data.id} is now in use`
+          : `Booking #${data.id} marked paid`,
+      );
       queryClient.invalidateQueries({ active: true });
       navigate("/");
     },
