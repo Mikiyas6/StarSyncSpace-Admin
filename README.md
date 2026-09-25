@@ -1,6 +1,6 @@
 # SyncSpace Admin
 
-Admin dashboard for **SyncSpace** — bookable meeting rooms by the hour. Built on React + Vite + styled-components + React Query + Supabase.
+Admin dashboard for **SyncSpace** — bookable meeting rooms by the hour. Built on React + Vite + styled-components + React Query + Supabase
 
 ## Overview
 
