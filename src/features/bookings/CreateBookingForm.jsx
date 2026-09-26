@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import styled, { css } from "styled-components";
 import { useQuery } from "@tanstack/react-query";
 import toast from "react-hot-toast";
@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 
 import Button from "../../ui/Button";
+import DateTimePicker from "../../ui/DateTimePicker";
 import SpinnerMini from "../../ui/SpinnerMini";
 
 import { useRooms } from "../rooms/useRooms";
@@ -23,14 +24,20 @@ import { searchGuests, findOrCreateGuest } from "../../services/apiGuests";
 import { getRoomBookingsAround } from "../../services/apiBookings";
 import {
   FULL_DAY_MINUTES,
-  MINUTE_MS,
-  durationOptions,
+  durationBounds,
   formatDuration,
   priceForMinutes,
-  roundUpToStep,
   usdPerMinuteFromRoom,
   validateAdminBooking,
 } from "../../utils/booking";
+import {
+  endAfterLength,
+  initialWindow,
+  moveWindowStart,
+  setWindowEnd,
+  windowMinutes,
+} from "./bookingWindow";
+import { parseLocalInput, toLocalInputValue } from "../../utils/datetime";
 import { formatCurrency } from "../../utils/helpers";
 
 /* ------------------------------------------------------------------
@@ -39,9 +46,19 @@ import { formatCurrency } from "../../utils/helpers";
    The public site's form is built around a person browsing: a grid of
    start times an hour or more away, and a card payment before anything
    is written. Neither fits a walk-in. This asks the four questions the
-   desk actually asks — who, which room, from when, for how long —
-   defaults the start to "right now", and records that cash changed
-   hands.
+   desk actually asks — which room, who, from when until when, and was
+   it paid — defaults the start to "right now", and records that cash
+   changed hands.
+
+   On TIME: the length of a booking is a START and an END, typed as two
+   clock times, because that is the sentence the guest says ("from now
+   till six") and the one the desk has to read back to them. It used to
+   be a dropdown of 15-minute intervals, which meant working out in your
+   head that half past two until six is three and a half hours, and
+   which could not express anything the list left out. The two times are
+   now the input; the length is a number this form works out and shows
+   back. Quick-length buttons remain, but they only move the end time —
+   they are a shortcut for typing, not a separate way of saying it.
 
    On ERRORS: a disabled button is not an error message. It tells the
    admin that something is wrong and nothing about what, which is
@@ -197,6 +214,29 @@ const Hint = styled.p`
   color: var(--color-grey-500);
 `;
 
+/* The two time boxes are the one place in this sheet where a placeholder
+   cannot do the labelling for us: a datetime-local input shows a date
+   mask, not a hint, so "Starts" and "Ends" have to be said out loud. */
+const FieldLabel = styled.label`
+  display: block;
+  margin-bottom: 0.5rem;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--color-grey-600);
+`;
+
+const QuickRow = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.8rem;
+
+  & > span {
+    font-size: 1.25rem;
+    color: var(--color-grey-500);
+  }
+`;
+
 /* ------------------------------ controls ---------------------------- */
 
 const invalidRing = css`
@@ -225,19 +265,6 @@ const TextInput = styled.input`
   ${(props) => props.$invalid && invalidRing}
 `;
 
-const NativeSelect = styled.select`
-  width: 100%;
-  border: 1px solid var(--color-grey-300);
-  background-color: var(--color-grey-0);
-  border-radius: var(--border-radius-sm);
-  box-shadow: var(--shadow-sm);
-  padding: 0.9rem 1.2rem;
-  font-size: 1.4rem;
-  font-weight: 500;
-  color: var(--color-grey-700);
-  ${(props) => props.$invalid && invalidRing}
-`;
-
 const NoteArea = styled.textarea`
   width: 100%;
   height: 7rem;
@@ -252,21 +279,33 @@ const NoteArea = styled.textarea`
   color: var(--color-grey-700);
 `;
 
-/* Rooms are few and each has facts worth seeing (seats, rate), so they
-   are cards rather than a dropdown you have to open to compare. */
-const RoomGrid = styled.div`
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
-  gap: 0.8rem;
-  ${(props) =>
-    props.$invalid &&
-    css`
-      padding: 0.6rem;
-      margin: -0.6rem;
-      border-radius: var(--border-radius-sm);
-      ${invalidRing}
-      border: 1px solid var(--color-red-700);
-    `}
+/* One dropdown for the rooms. They were cards in a grid, which reads
+   nicely at eight rooms and turns into a wall at forty — and a wall is
+   what the desk would have to scroll past to reach the guest and the
+   times underneath it. Each room's facts (seats, rate) ride along in the
+   option's own label, so the closed dropdown still shows them for the
+   room that is chosen and nothing is lost by collapsing the grid. */
+const NativeSelect = styled.select`
+  width: 100%;
+  border: 1px solid var(--color-grey-300);
+  background-color: var(--color-grey-0);
+  border-radius: var(--border-radius-sm);
+  box-shadow: var(--shadow-sm);
+  padding: 0.9rem 1.2rem;
+  font-size: 1.4rem;
+  font-weight: 500;
+  font-family: inherit;
+  color: var(--color-grey-700);
+  ${(props) => props.$invalid && invalidRing}
+
+  &:focus {
+    outline: 2px solid var(--color-brand-600);
+    outline-offset: -1px;
+  }
+  &:disabled {
+    background-color: var(--color-grey-50);
+    color: var(--color-grey-400);
+  }
 `;
 
 /* GlobalStyles carries `button:has(svg) { line-height: 0 }` to tighten
@@ -279,46 +318,6 @@ const textButtonLineHeight = css`
 
   & svg {
     line-height: 0;
-  }
-`;
-
-const Card = styled.button`
-  ${textButtonLineHeight}
-  text-align: left;
-  cursor: pointer;
-  padding: 1rem 1.2rem;
-  border-radius: var(--border-radius-sm);
-  border: 1px solid
-    ${(props) =>
-      props.$selected ? "var(--color-brand-600)" : "var(--color-grey-200)"};
-  background-color: ${(props) =>
-    props.$selected ? "var(--color-brand-50)" : "var(--color-grey-0)"};
-  box-shadow: var(--shadow-sm);
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-
-  &:hover {
-    border-color: var(--color-brand-600);
-  }
-
-  & strong {
-    font-size: 1.5rem;
-    font-weight: 600;
-    color: var(--color-grey-700);
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-  }
-  & span {
-    font-size: 1.2rem;
-    color: var(--color-grey-500);
-  }
-  & svg {
-    width: 1.6rem;
-    height: 1.6rem;
-    color: var(--color-brand-600);
-    margin-left: auto;
   }
 `;
 
@@ -352,12 +351,6 @@ const Segment = styled.button`
     width: 1.5rem;
     height: 1.5rem;
   }
-`;
-
-const Chips = styled.div`
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.6rem;
 `;
 
 const Chip = styled.button`
@@ -539,21 +532,15 @@ const Footer = styled.div`
 
 /* ------------------------------ helpers ----------------------------- */
 
-// <input type="datetime-local"> wants local wall-clock time with no zone.
-// toISOString() would hand it UTC and silently shift the booking by the
-// timezone offset, which in Kigali is two hours of free room time.
-function toLocalInputValue(date) {
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
-    date.getDate(),
-  )}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
 function looksLikeEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value).trim());
 }
 
-const DURATION_PRESETS = [30, 60, 120, 240, 480, FULL_DAY_MINUTES];
+const DEFAULT_MINUTES = 60;
+
+/* Shortcuts that move the END time. Not a way of setting the booking's
+   length — the two clock times are the only thing that does that. */
+const QUICK_LENGTHS = [30, 60, 120, 240, 480, FULL_DAY_MINUTES];
 
 const WHEN_FORMAT = {
   weekday: "short",
@@ -563,6 +550,8 @@ const WHEN_FORMAT = {
   minute: "2-digit",
 };
 
+const TIME_FORMAT = { hour: "2-digit", minute: "2-digit" };
+
 function CreateBookingForm({ onCloseModal }) {
   const { rooms, isLoading: isLoadingRooms } = useRooms();
   const { settings, isLoading: isLoadingSettings } = useSettings();
@@ -570,10 +559,9 @@ function CreateBookingForm({ onCloseModal }) {
 
   const [roomId, setRoomId] = useState("");
   const [startsNow, setStartsNow] = useState(true);
-  const [startValue, setStartValue] = useState(() =>
-    toLocalInputValue(roundUpToStep(new Date())),
-  );
-  const [durationMinutes, setDurationMinutes] = useState(60);
+  /* Both ends of the booking in one piece of state, because they are not
+     independent: moving the start drags the end along with it. */
+  const [when, setWhen] = useState(() => initialWindow(DEFAULT_MINUTES));
   const [observations, setObservations] = useState("");
   const [numGuests, setNumGuests] = useState(1);
   const [isPaid, setIsPaid] = useState(true);
@@ -603,29 +591,54 @@ function CreateBookingForm({ onCloseModal }) {
 
   const room = rooms?.find((entry) => String(entry.id) === String(roomId));
 
+  /* getRooms() asks for no ordering, so the rows arrive in whatever order
+     Postgres felt like. Eight cards in a grid survived that; a dropdown
+     of forty would be unusable, so the names are sorted here — numerically,
+     so room 9 comes before room 10 rather than after it. */
+  const roomOptions = useMemo(
+    () =>
+      [...(rooms ?? [])].sort((a, b) =>
+        String(a.name).localeCompare(String(b.name), undefined, {
+          numeric: true,
+        }),
+      ),
+    [rooms],
+  );
+
+  /* The rules for how the two boxes move are in bookingWindow.js, pure
+     and tested; these only hand them the current state. */
+  const setStart = useCallback((value) => {
+    setWhen((current) => moveWindowStart(current, value));
+  }, []);
+
+  const setEnd = useCallback((value) => {
+    setWhen((current) => setWindowEnd(current, value));
+  }, []);
+
+  const setLength = useCallback((minutes) => {
+    setWhen((current) => endAfterLength(current, minutes));
+  }, []);
+
   // "Starts now" has to keep meaning NOW while the form is open — a desk
   // form can sit on screen for several minutes while the guest finds
   // their email address, and writing a start time from when the modal
-  // opened would book the room in the past.
+  // opened would book the room in the past. The end moves with it, so the
+  // length the desk agreed on survives the wait.
   useEffect(() => {
     if (!startsNow) return;
-    const tick = () => setStartValue(toLocalInputValue(new Date()));
+    const tick = () => setStart(toLocalInputValue(new Date()));
     tick();
     const id = setInterval(tick, 30 * 1000);
     return () => clearInterval(id);
-  }, [startsNow]);
+  }, [startsNow, setStart]);
 
-  const start = useMemo(
-    () => (startValue ? new Date(startValue) : null),
-    [startValue],
-  );
-  const end = useMemo(
-    () =>
-      start && !Number.isNaN(start.getTime())
-        ? new Date(start.getTime() + durationMinutes * MINUTE_MS)
-        : null,
-    [start, durationMinutes],
-  );
+  const start = useMemo(() => parseLocalInput(when.start), [when.start]);
+  const end = useMemo(() => parseLocalInput(when.end), [when.end]);
+
+  /* The length is no longer something anyone picks — it is the distance
+     between the two times, and every price and summary reads it here. */
+  const durationMinutes = useMemo(() => windowMinutes(when), [when]);
+  const hasValidWindow = durationMinutes > 0;
 
   const { data: existingBookings = [] } = useQuery({
     queryKey: ["room-bookings", roomId, start?.toISOString(), end?.toISOString()],
@@ -633,22 +646,22 @@ function CreateBookingForm({ onCloseModal }) {
     enabled: Boolean(roomId && start && end),
   });
 
-  const durations = useMemo(() => durationOptions(settings), [settings]);
-  const presets = useMemo(
-    () => DURATION_PRESETS.filter((m) => durations.includes(m)),
-    [durations],
+  const bounds = useMemo(() => durationBounds(settings), [settings]);
+  const quickLengths = useMemo(
+    () => QUICK_LENGTHS.filter((m) => m >= bounds.min && m <= bounds.max),
+    [bounds],
   );
 
   const check = useMemo(() => {
-    if (!room || !start) return {};
+    if (!room || !start || !end) return {};
     return validateAdminBooking({
       start,
-      durationMinutes,
+      end,
       room,
       settings: settings ?? {},
       existingBookings,
     });
-  }, [room, start, durationMinutes, settings, existingBookings]);
+  }, [room, start, end, settings, existingBookings]);
 
   /* Everything wrong with the sheet right now, in the order the fields
      appear, each tied to the control it belongs to so the list can focus
@@ -671,8 +684,10 @@ function CreateBookingForm({ onCloseModal }) {
         add("guestEmail", `"${newGuest.email.trim()}" is not a valid email address`);
     }
 
-    if (!startValue || !start || Number.isNaN(start.getTime()))
-      add("start", "Pick the date and time this booking starts");
+    if (!start) add("start", "Pick the date and time this booking starts");
+    if (!end) add("end", "Pick the date and time this booking ends");
+    else if (start && end <= start)
+      add("end", "The end time has to be after the start time");
 
     if (room && Number(numGuests) > room.maxCapacity)
       add(
@@ -685,14 +700,23 @@ function CreateBookingForm({ onCloseModal }) {
     // reported against the field it belongs to.
     if (check.error) add(check.field ?? "start", check.error);
 
-    return list;
+    /* The validator and the checks above can reach the same conclusion —
+       an end before its start is both an obvious typo and a rule breach —
+       and saying it twice makes the list look like two separate faults. */
+    const seen = new Set();
+    return list.filter((problem) => {
+      const key = `${problem.field}:${problem.message}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   }, [
     roomId,
     guestMode,
     selectedGuestId,
     newGuest,
-    startValue,
     start,
+    end,
     room,
     numGuests,
     check,
@@ -705,9 +729,10 @@ function CreateBookingForm({ onCloseModal }) {
   // telling-off about an empty box, so it shows the moment it is true.
   const availabilityError = check.error;
 
-  const price = room
-    ? priceForMinutes(durationMinutes, usdPerMinuteFromRoom(room))
-    : null;
+  const price =
+    room && hasValidWindow
+      ? priceForMinutes(durationMinutes, usdPerMinuteFromRoom(room))
+      : null;
 
   function focusField(field) {
     const el = fieldRefs.current[field];
@@ -740,7 +765,7 @@ function CreateBookingForm({ onCloseModal }) {
           room,
           settings: settings ?? {},
           start,
-          durationMinutes,
+          end,
           observations,
           numGuests: Number(numGuests) || 1,
           isPaid,
@@ -770,8 +795,9 @@ function CreateBookingForm({ onCloseModal }) {
       <Title>
         <h2>New booking</h2>
         <p>
-          For someone at the desk — no one hour of notice needed, and it can
-          start this minute.
+          For someone at the desk — no hour of notice needed, and it can start
+          this minute. Say when it starts and when it ends; the length and the
+          price follow.
         </p>
       </Title>
 
@@ -801,32 +827,28 @@ function CreateBookingForm({ onCloseModal }) {
           <Step>
             <StepHead>
               <span data-num>1</span> Room
+              <small>
+                {roomOptions.length === 1
+                  ? "1 room"
+                  : `${roomOptions.length} rooms`}
+              </small>
             </StepHead>
-            <RoomGrid $invalid={Boolean(errorFor("room"))}>
-              {(rooms ?? []).map((entry, index) => {
-                const selected = String(entry.id) === String(roomId);
-                return (
-                  <Card
-                    key={entry.id}
-                    type="button"
-                    $selected={selected}
-                    disabled={busy}
-                    ref={index === 0 ? registerField("room") : undefined}
-                    onClick={() => setRoomId(String(entry.id))}
-                    aria-pressed={selected}
-                  >
-                    <strong>
-                      {entry.name}
-                      {selected ? <Check /> : null}
-                    </strong>
-                    <span>
-                      {entry.maxCapacity} seats ·{" "}
-                      {formatCurrency(entry.regularPrice)}/hr
-                    </span>
-                  </Card>
-                );
-              })}
-            </RoomGrid>
+            <NativeSelect
+              id="booking-room"
+              value={roomId}
+              disabled={busy}
+              ref={registerField("room")}
+              $invalid={Boolean(errorFor("room"))}
+              onChange={(e) => setRoomId(e.target.value)}
+            >
+              <option value="">Choose a room…</option>
+              {roomOptions.map((entry) => (
+                <option key={entry.id} value={entry.id}>
+                  {entry.name} — {entry.maxCapacity} seats ·{" "}
+                  {formatCurrency(entry.regularPrice)}/hr
+                </option>
+              ))}
+            </NativeSelect>
             {errorFor("room") ? (
               <FieldError>
                 <AlertCircle /> {errorFor("room")}
@@ -956,7 +978,10 @@ function CreateBookingForm({ onCloseModal }) {
           {/* ------------------------------ when ---------------------- */}
           <Step>
             <StepHead>
-              <span data-num>3</span> When
+              <span data-num>3</span> From / to
+              <small>
+                {formatDuration(bounds.min)}–{formatDuration(bounds.max)}
+              </small>
             </StepHead>
 
             <Toggle $on={startsNow}>
@@ -974,75 +999,95 @@ function CreateBookingForm({ onCloseModal }) {
                   />{" "}
                   Start right now
                 </strong>
-                <span>Keeps up with the clock while this form is open</span>
+                <span>
+                  Keeps up with the clock while this form is open, and carries
+                  the end time along with it
+                </span>
               </div>
             </Toggle>
 
-            <TextInput
-              type="datetime-local"
-              value={startValue}
-              disabled={busy || startsNow}
-              ref={registerField("start")}
-              $invalid={Boolean(errorFor("start"))}
-              onChange={(e) => setStartValue(e.target.value)}
-            />
-            {errorFor("start") ? (
-              <FieldError>
-                <AlertCircle /> {errorFor("start")}
-              </FieldError>
-            ) : !showProblems && availabilityError ? (
-              <FieldError>
-                <AlertCircle /> {availabilityError}
-              </FieldError>
-            ) : null}
-          </Step>
+            <Pair>
+              <div>
+                <FieldLabel as="span">Starts</FieldLabel>
+                <DateTimePicker
+                  id="booking-start"
+                  value={when.start}
+                  disabled={busy || startsNow}
+                  ref={registerField("start")}
+                  invalid={Boolean(errorFor("start"))}
+                  onChange={setStart}
+                  ariaLabel="Booking start"
+                />
+              </div>
+              <div>
+                <FieldLabel as="span">Ends</FieldLabel>
+                {/* The end can never be before the start, so the days
+                    before it are struck out rather than left to be picked
+                    and then complained about. */}
+                <DateTimePicker
+                  id="booking-end"
+                  value={when.end}
+                  min={when.start}
+                  disabled={busy}
+                  ref={registerField("end")}
+                  invalid={Boolean(errorFor("end"))}
+                  onChange={setEnd}
+                  ariaLabel="Booking end"
+                  align="right"
+                />
+              </div>
+            </Pair>
 
-          {/* ---------------------------- how long -------------------- */}
-          <Step>
-            <StepHead>
-              <span data-num>4</span> How long
-              <small>15-minute steps</small>
-            </StepHead>
-
-            <Chips>
-              {presets.map((minutes) => (
+            {/* The end box carries its own date, so an overnight session is
+                just a later date — nothing to explain and nothing to guess.
+                The readout says the length back, which is the number the
+                dropdown used to make the desk work out by hand. */}
+            <QuickRow>
+              <span>Or end it after</span>
+              {quickLengths.map((minutes) => (
                 <Chip
                   key={minutes}
                   type="button"
                   $active={minutes === durationMinutes}
                   aria-pressed={minutes === durationMinutes}
-                  disabled={busy}
-                  onClick={() => setDurationMinutes(minutes)}
+                  disabled={busy || !start}
+                  onClick={() => setLength(minutes)}
                 >
                   {formatDuration(minutes)}
                 </Chip>
               ))}
-            </Chips>
+            </QuickRow>
 
-            <NativeSelect
-              value={durationMinutes}
-              disabled={busy}
-              ref={registerField("duration")}
-              $invalid={Boolean(errorFor("duration"))}
-              onChange={(e) => setDurationMinutes(Number(e.target.value))}
-            >
-              {durations.map((minutes) => (
-                <option key={minutes} value={minutes}>
-                  {formatDuration(minutes)}
-                </option>
-              ))}
-            </NativeSelect>
-            {errorFor("duration") ? (
+            {errorFor("start") ? (
               <FieldError>
-                <AlertCircle /> {errorFor("duration")}
+                <AlertCircle /> {errorFor("start")}
               </FieldError>
+            ) : null}
+            {errorFor("end") ? (
+              <FieldError>
+                <AlertCircle /> {errorFor("end")}
+              </FieldError>
+            ) : null}
+            {!showProblems && availabilityError ? (
+              <FieldError>
+                <AlertCircle /> {availabilityError}
+              </FieldError>
+            ) : hasValidWindow && end ? (
+              <Hint>
+                <Clock
+                  size={12}
+                  style={{ display: "inline", verticalAlign: "-1px" }}
+                />{" "}
+                Runs for {formatDuration(durationMinutes)}, until{" "}
+                {end.toLocaleTimeString(undefined, TIME_FORMAT)}
+              </Hint>
             ) : null}
           </Step>
 
           {/* --------------------------- at the desk ------------------ */}
           <Step>
             <StepHead>
-              <span data-num>5</span> At the desk
+              <span data-num>4</span> At the desk
             </StepHead>
 
             <Pair>
@@ -1135,7 +1180,7 @@ function CreateBookingForm({ onCloseModal }) {
             When
           </dt>
           <dd>
-            {start && end && !Number.isNaN(start.getTime()) ? (
+            {start && end && hasValidWindow ? (
               <>
                 {start.toLocaleString(undefined, WHEN_FORMAT)}
                 <ArrowRight
@@ -1150,7 +1195,9 @@ function CreateBookingForm({ onCloseModal }) {
           </dd>
         </Line>
         <Total>
-          <dt>{formatDuration(durationMinutes)}</dt>
+          <dt>
+            {hasValidWindow ? formatDuration(durationMinutes) : "Length not set"}
+          </dt>
           <dd>
             {price ? formatCurrency(price.usd) : "—"}
             {price ? <small>{price.rwf.toLocaleString()} RWF</small> : null}

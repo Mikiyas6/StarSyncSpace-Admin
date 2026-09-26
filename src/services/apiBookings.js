@@ -231,6 +231,7 @@ export async function createBookingApi({
   room,
   settings,
   start,
+  end,
   durationMinutes,
   observations = "",
   numGuests = 1,
@@ -240,14 +241,19 @@ export async function createBookingApi({
   if (!roomId) throw new Error("Pick a room");
   if (!guestId) throw new Error("Pick or create a guest");
 
-  const existing = await getRoomBookingsAround(
-    roomId,
-    start,
-    new Date(new Date(start).getTime() + durationMinutes * MINUTE_MS),
-  );
+  /* The desk sends a start and an end. A length is still accepted for
+     callers that hold one, and the validator settles which wins — this
+     only needs SOME end to know which day's bookings to read. */
+  const endsAt =
+    end instanceof Date && !Number.isNaN(end.getTime())
+      ? end
+      : new Date(new Date(start).getTime() + durationMinutes * MINUTE_MS);
+
+  const existing = await getRoomBookingsAround(roomId, start, endsAt);
 
   const { error: invalid, value } = validateAdminBooking({
     start,
+    end,
     durationMinutes,
     room,
     settings,

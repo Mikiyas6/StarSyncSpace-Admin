@@ -176,6 +176,14 @@ export function conflictsWithBookings(
     );
 }
 
+/* Whole minutes only. A datetime-local box hands over hours and minutes
+   and nothing finer, so any seconds riding along came from the clock, not
+   from anyone's intention — and rounding them to the nearest minute would
+   turn a 14:00 end typed 40 seconds in into an extra billed minute. */
+function wholeMinutes(date) {
+  return Math.floor(date.getTime() / MINUTE_MS) * MINUTE_MS;
+}
+
 /* Round a moment UP to the next 15-minute step, so the desk's default
    start lines up with the same grid the public slot picker uses. */
 export function roundUpToStep(date, stepMinutes = SLOT_STEP_MINUTES) {
@@ -212,6 +220,18 @@ export function formatDuration(minutes) {
   return `${hours} hr${hours > 1 ? "s" : ""} ${mins} min`;
 }
 
+/* The shortest and longest a booking may run, as plain numbers, so a
+   screen can say "15 min to 24 hrs" without walking the whole option
+   list to find its own ends. */
+export function durationBounds(settings = {}) {
+  const min = Math.max(1, Number(settings?.min_booking_duration_minutes) || 15);
+  const max = Math.max(
+    min,
+    Number(settings?.max_booking_duration_minutes) || FULL_DAY_MINUTES,
+  );
+  return { min, max };
+}
+
 /* ------------------------------------------------------------------
    One validator for a booking the desk is about to write.
 
@@ -220,9 +240,18 @@ export function formatDuration(minutes) {
    just walked in and wants the room now. What it does keep is every
    rule that protects the room itself — no double-booking, no eating
    into the turnaround window, no zero-length or absurd durations.
+
+   LENGTH comes in one of two shapes. The desk now types a start and an
+   end — that is how a person at a counter thinks about a room, and it
+   was the only way to say "until 6" without counting hours in your head
+   — so `end` is the preferred input. `durationMinutes` is still accepted
+   for callers that hold a length instead. When both arrive, `end` wins.
+   Either way the stored end is recomputed from the rounded minute count,
+   so endTime and duration_minutes can never disagree.
    ------------------------------------------------------------------ */
 export function validateAdminBooking({
   start,
+  end: endInput,
   durationMinutes,
   room,
   settings = {},
@@ -237,22 +266,32 @@ export function validateAdminBooking({
   if (!(start instanceof Date) || Number.isNaN(start.getTime()))
     return { error: "Pick a valid start date and time", field: "start" };
 
-  const minutes = Number(durationMinutes);
-  if (!Number.isFinite(minutes) || minutes <= 0)
-    return { error: "Pick how long the booking runs for", field: "duration" };
+  const hasEnd = endInput instanceof Date && !Number.isNaN(endInput.getTime());
+  // Length complaints belong under whichever control the caller actually
+  // showed: the end-time box, or the older duration control.
+  const lengthField = hasEnd ? "end" : "duration";
+  const minutes = hasEnd
+    ? (wholeMinutes(endInput) - wholeMinutes(start)) / MINUTE_MS
+    : Number(durationMinutes);
 
-  const minMinutes = Number(settings.min_booking_duration_minutes) || 15;
-  const maxMinutes =
-    Number(settings.max_booking_duration_minutes) || FULL_DAY_MINUTES;
+  if (!Number.isFinite(minutes) || minutes <= 0)
+    return {
+      error: hasEnd
+        ? "The end time has to be after the start time"
+        : "Pick how long the booking runs for",
+      field: lengthField,
+    };
+
+  const { min: minMinutes, max: maxMinutes } = durationBounds(settings);
   if (minutes < minMinutes)
     return {
       error: `Bookings must be at least ${formatDuration(minMinutes)} long`,
-      field: "duration",
+      field: lengthField,
     };
   if (minutes > maxMinutes)
     return {
       error: `Bookings cannot be longer than ${formatDuration(maxMinutes)}`,
-      field: "duration",
+      field: lengthField,
     };
 
   const end = new Date(start.getTime() + minutes * MINUTE_MS);

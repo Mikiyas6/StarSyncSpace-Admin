@@ -6,6 +6,7 @@ import {
   NON_BLOCKING_STATUSES,
   conflictsWithBookings,
   derivedStatus,
+  durationBounds,
   durationOptions,
   fitsBusinessHours,
   formatDuration,
@@ -333,6 +334,174 @@ describe("validateAdminBooking", () => {
     });
     expect(ok.error).toBeUndefined();
     expect(ok.field).toBeUndefined();
+  });
+});
+
+/* ================================================================
+   The desk types two clock times, not a length
+
+   The admin form dropped its interval dropdown for a start box and an
+   end box, so the length arrives as the distance between them. These
+   cover the seam: the same rules have to hold, the arithmetic has to
+   land on the minute, and complaints about length now belong under the
+   END box rather than a duration control that no longer exists.
+   ================================================================ */
+describe("validateAdminBooking, given an end time", () => {
+  const base = {
+    room: ROOM,
+    settings: OPEN_24_7,
+    existingBookings: [],
+    now: NOW,
+  };
+
+  it("works out the length from the two times", () => {
+    const { error, value } = validateAdminBooking({
+      ...base,
+      start: at("13:00"),
+      end: at("15:30"),
+    });
+    expect(error).toBeUndefined();
+    expect(value.durationMinutes).toBe(150);
+    expect(value.end.toISOString()).toBe(at("15:30").toISOString());
+  });
+
+  it("prices an end time the old dropdown could not express", () => {
+    // 20/hr for 1 hr 50 min. No interval list would have offered this.
+    const { value } = validateAdminBooking({
+      ...base,
+      start: at("13:00"),
+      end: at("14:50"),
+    });
+    expect(value.durationMinutes).toBe(110);
+    expect(value.usd).toBe(36.67);
+  });
+
+  it("keeps endTime and duration_minutes in step, to the minute", () => {
+    // Seconds the browser never showed must not become a longer booking.
+    const start = at("13:00");
+    const end = new Date(at("14:00").getTime() + 40 * 1000);
+    const { value } = validateAdminBooking({ ...base, start, end });
+    expect(value.durationMinutes).toBe(60);
+    expect(value.end.getTime() - value.start.getTime()).toBe(
+      value.durationMinutes * MINUTE,
+    );
+  });
+
+  it("refuses an end at or before the start, and says which box is wrong", () => {
+    const backwards = validateAdminBooking({
+      ...base,
+      start: at("15:00"),
+      end: at("14:00"),
+    });
+    expect(backwards.error).toMatch(/after the start time/i);
+    expect(backwards.field).toBe("end");
+
+    expect(
+      validateAdminBooking({ ...base, start: at("15:00"), end: at("15:00") }).field,
+    ).toBe("end");
+  });
+
+  it("puts min and max complaints under the end box", () => {
+    const settings = {
+      ...OPEN_24_7,
+      min_booking_duration_minutes: 60,
+      max_booking_duration_minutes: 240,
+    };
+    const tooShort = validateAdminBooking({
+      ...base,
+      settings,
+      start: at("13:00"),
+      end: at("13:30"),
+    });
+    expect(tooShort.error).toMatch(/at least 1 hr/);
+    expect(tooShort.field).toBe("end");
+
+    const tooLong = validateAdminBooking({
+      ...base,
+      settings,
+      start: at("13:00"),
+      end: at("18:00"),
+    });
+    expect(tooLong.error).toMatch(/longer than 4 hrs/);
+    expect(tooLong.field).toBe("end");
+  });
+
+  it("still guards the room: clashes and opening hours are unchanged", () => {
+    expect(
+      validateAdminBooking({
+        ...base,
+        start: at("12:00"),
+        end: at("15:00"),
+        existingBookings: [existing("13:00", "14:00")],
+      }).error,
+    ).toMatch(/clashes/i);
+
+    expect(
+      validateAdminBooking({
+        ...base,
+        settings: OFFICE_HOURS,
+        start: at("19:00"),
+        end: at("22:00"),
+      }).error,
+    ).toMatch(/opening hours/i);
+  });
+
+  it("takes an overnight session, because the end box carries its own date", () => {
+    const { error, value } = validateAdminBooking({
+      ...base,
+      start: at("22:00"),
+      end: at("02:00", 1),
+    });
+    expect(error).toBeUndefined();
+    expect(value.durationMinutes).toBe(240);
+  });
+
+  it("prefers the end time when a length is passed alongside it", () => {
+    const { value } = validateAdminBooking({
+      ...base,
+      start: at("13:00"),
+      end: at("14:00"),
+      durationMinutes: 480,
+    });
+    expect(value.durationMinutes).toBe(60);
+  });
+
+  it("falls back to the length when the end is missing or unparseable", () => {
+    expect(
+      validateAdminBooking({ ...base, start: at("13:00"), durationMinutes: 90 })
+        .value.durationMinutes,
+    ).toBe(90);
+    expect(
+      validateAdminBooking({
+        ...base,
+        start: at("13:00"),
+        end: new Date("nonsense"),
+        durationMinutes: 90,
+      }).value.durationMinutes,
+    ).toBe(90);
+  });
+});
+
+describe("durationBounds", () => {
+  it("reads the configured window", () => {
+    expect(
+      durationBounds({
+        min_booking_duration_minutes: 30,
+        max_booking_duration_minutes: 480,
+      }),
+    ).toEqual({ min: 30, max: 480 });
+  });
+
+  it("falls back to 15 minutes and a full day when unset", () => {
+    expect(durationBounds()).toEqual({ min: 15, max: FULL_DAY_MINUTES });
+  });
+
+  it("never returns a max below its min", () => {
+    const { min, max } = durationBounds({
+      min_booking_duration_minutes: 120,
+      max_booking_duration_minutes: 30,
+    });
+    expect(max).toBe(min);
   });
 });
 

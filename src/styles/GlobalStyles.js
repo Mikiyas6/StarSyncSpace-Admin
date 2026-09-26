@@ -45,7 +45,16 @@ const GlobalStyles = createGlobalStyle`
   --color-red-100: #fee2e2;
   --color-red-700: #b91c1c;
   --color-red-800: #991b1b;
-  
+
+  /* Brand gold and teal, the two colours of the logo lockup. Copied
+     value-for-value from the gold and teal scales in
+     StarSyncSpace-Client/app/_styles/globals.css so the wordmark reads
+     identically in both apps. Used by the logo; the admin's own chrome
+     stays slate. */
+  --color-gold-500: #d8ac52;
+  --color-gold-600: #b38a34;
+  --color-teal-500: #2aae9b;
+
   --backdrop-color: rgba(255, 255, 255, 0.1);
   
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
@@ -76,6 +85,12 @@ const GlobalStyles = createGlobalStyle`
     --color-grey-700: #e2e8f0;
     --color-grey-800: #f1f5f9;
     --color-grey-900: #f8fafc;
+
+  /* The client lightens gold in the dark theme and leaves teal alone,
+     because teal already carries on a black canvas. Same values. */
+  --color-gold-500: #d8ac52;
+  --color-gold-600: #e5c480;
+  --color-teal-500: #2aae9b;
 
   --color-blue-100: #0f1c2e;
   --color-blue-700: #7cc3ee;

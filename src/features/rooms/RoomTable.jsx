@@ -30,9 +30,11 @@ function RoomTable() {
   });
   return (
     <Menus>
-      <Table columns="0.6fr 1.8fr 2.2fr 1fr 1fr 1fr">
+      {/* The photo column is a fixed width because it holds a fixed-size
+          thumbnail; everything after it shares what is left. */}
+      <Table columns="8.8rem 2.6fr 1.3fr 1.2fr 0.8fr 3.2rem">
         <Table.Header>
-          <div></div>
+          <div>Photo</div>
           <div>Room</div>
           <div>Capacity</div>
           <div>Price</div>
