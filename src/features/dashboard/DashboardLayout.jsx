@@ -7,15 +7,37 @@ import { useRooms } from "../rooms/useRooms";
 import { lazy, Suspense } from "react";
 import TodayActivity from "../check-in-out/TodayActivity";
 import EndingSoon from "../check-in-out/EndingSoon";
+import { useRevenue } from "./useRevenue";
+import { useAdminRole } from "../authentication/useAdminRole";
 
 const SalesChart = lazy(() => import("./SalesChart"));
+const RevenueChart = lazy(() => import("./RevenueChart"));
+const RevenueBreakdown = lazy(() => import("./RevenueBreakdown"));
 const DurationChart = lazy(() => import("./DurationChart"));
 
 const StyledDashboardLayout = styled.div`
   display: grid;
   grid-template-columns: 1fr 1fr 1fr 1fr;
-  grid-template-rows: auto 34rem auto auto;
+  /* Auto rows rather than a fixed track list. The layout used to name
+     four rows, and the revenue section adds several more; a fixed list
+     silently clips whatever falls past its end.
+     (No backticks in here - this is inside a template literal.) */
+  grid-auto-rows: auto;
   gap: 2.4rem;
+`;
+
+const Section = styled.h2`
+  grid-column: 1 / -1;
+  margin-top: 1.6rem;
+  font-size: 2rem;
+  font-weight: 600;
+  color: var(--color-grey-700);
+`;
+
+const Note = styled.p`
+  grid-column: 1 / -1;
+  color: var(--color-grey-500);
+  font-size: 1.4rem;
 `;
 
 const ChartFallback = styled.div`
@@ -46,6 +68,9 @@ function DashboardLayout() {
   const { stays, confirmedStays, isLoading2, numDays, startDate, endDate } =
     useRecentStays();
   const { rooms, isLoading: isLoading3 } = useRooms();
+  const { can } = useAdminRole();
+  const revenue = useRevenue();
+
   if (isLoading || isLoading2 || isLoading3) return <Spinner />;
 
   return (
@@ -66,6 +91,47 @@ function DashboardLayout() {
           endDate={endDate}
         />
       </Suspense>
+
+      {/* Revenue is admin-only. Staff run the day; what the business
+          takes is not part of running it, and RLS does not hide it (the
+          rows are readable by the desk), so this is one of the few places
+          the UI gate is the only gate. Nothing sensitive to a customer is
+          exposed either way — it is a business-confidentiality choice, not
+          a security boundary. */}
+      {can.viewRevenue ? (
+        <>
+          <Section>Revenue</Section>
+
+          {revenue.isLoading ? (
+            <ChartFallback />
+          ) : (
+            <Suspense fallback={<ChartFallback />}>
+              <RevenueChart
+                series={revenue.series}
+                granularity={revenue.granularity}
+                startDate={revenue.startDate}
+                endDate={revenue.endDate}
+              />
+              <RevenueBreakdown
+                totals={revenue.totals}
+                byRoom={revenue.byRoom}
+                topItems={revenue.topItems}
+                shrinkage={revenue.shrinkage}
+                isEstimated={revenue.isEstimated}
+              />
+            </Suspense>
+          )}
+
+          {/* The stock tables may not exist yet. The room figures above
+              are still correct, so this says what is missing rather than
+              taking the whole section down. */}
+          {revenue.stockError ? (
+            <Note>
+              Snack sales are not included: {revenue.stockError.message}
+            </Note>
+          ) : null}
+        </>
+      ) : null}
     </StyledDashboardLayout>
   );
 }

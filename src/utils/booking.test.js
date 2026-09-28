@@ -78,6 +78,7 @@ describe("status model", () => {
   it("agrees with the client on which statuses release the room", () => {
     expect([...NON_BLOCKING_STATUSES].sort()).toEqual([
       "cancelled",
+      "completed",
       "failed",
       "no-show",
     ]);
@@ -85,6 +86,15 @@ describe("status model", () => {
 
   it("treats a pending payment hold as still holding the room", () => {
     expect(isBlockingBooking({ status: "pending" })).toBe(true);
+  });
+
+  /* Completing a session is the desk saying the guest has gone — almost
+     always before the end time they paid for. Holding the room until the
+     clock caught up meant the only way to put it back on sale was to
+     delete the booking, which erases a session that really happened. */
+  it("releases the room the moment a session is completed", () => {
+    expect(isBlockingBooking({ status: "completed" })).toBe(false);
+    expect(isBlockingBooking({ status: "in-use" })).toBe(true);
   });
 
   it("gives every known status a real tag colour", () => {

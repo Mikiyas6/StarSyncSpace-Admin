@@ -54,8 +54,19 @@ export const BOOKING_STATUSES = {
     label: "Completed",
     tag: "green",
     setBy: "auto",
-    holdsRoom: true,
-    help: "The session finished. Set automatically at the end time, or early by the desk.",
+    /* They have left. Whatever the booked end time said, the room and
+       every desk in it are free again from this moment.
+
+       This used to say true, on the reading that a completed booking
+       still "owns" its slot until the clock catches up. That is wrong in
+       the one case the status exists for: the desk presses Complete
+       because the guest walked out early, and the whole point is to put
+       the room back on sale. The seat count went on holding their desks
+       until the original end time, and the only way to free them was to
+       DELETE the booking — which destroys the record of a session that
+       really happened, and the money it took. */
+    holdsRoom: false,
+    help: "The session finished. Set automatically at the end time, or early by the desk. Frees the room and its desks immediately.",
   },
   cancelled: {
     label: "Cancelled",

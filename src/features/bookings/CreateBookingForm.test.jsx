@@ -17,9 +17,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 vi.mock("../rooms/useRooms", () => ({
   useRooms: () => ({
     rooms: [
-      { id: 3, name: "010", maxCapacity: 12, regularPrice: 40 },
-      { id: 1, name: "001", maxCapacity: 4, regularPrice: 20 },
-      { id: 2, name: "009", maxCapacity: 8, regularPrice: 30 },
+      { id: 3, name: "010", maxCapacity: 12, regularPrice: 40, room_type: "meeting_room" },
+      { id: 1, name: "001", maxCapacity: 4, regularPrice: 20, room_type: "meeting_room" },
+      { id: 2, name: "009", maxCapacity: 8, regularPrice: 30, room_type: "meeting_room" },
     ],
     isLoading: false,
   }),
@@ -49,6 +49,22 @@ vi.mock("../../services/apiGuests", () => ({
 
 vi.mock("../../services/apiBookings", () => ({
   getRoomBookingsAround: vi.fn(async () => []),
+  /* The form imports this for the shared-space branch. It is never called
+     with no room selected, but a module mock that omits an import leaves
+     it undefined — which fails the moment somebody adds a test that does
+     select one. */
+  getRoomSeatBookings: vi.fn(async () => []),
+}));
+
+/* Kept off the network. The real hook reads fx_rates and then the rates
+   API; the form only wants a number to multiply by. */
+vi.mock("../fx/useFxRate", () => ({
+  useFxRate: () => ({
+    rate: 1500,
+    toRwf: (usd) => Math.round(usd * 1500),
+    isIndicative: false,
+    isLoading: false,
+  }),
 }));
 
 const { default: CreateBookingForm } = await import("./CreateBookingForm");

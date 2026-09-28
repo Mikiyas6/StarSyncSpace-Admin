@@ -1,27 +1,42 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import {
+  attachMenuItemImage,
   deleteMenuItemImage,
-  getNextImageSortOrder,
   reorderMenuItemImages,
   setPrimaryMenuItemImage,
   updateMenuItemImage,
-  uploadMenuItemImage,
 } from "../../services/apiMenu";
 import { menuQueryKey } from "./useMenuOverview";
 
 export function useMenuItemImages(menuItemId) {
   const queryClient = useQueryClient();
-  const invalidate = () =>
-    queryClient.invalidateQueries({ queryKey: menuQueryKey });
 
+  /* The menu is where photos are edited, but it is not the only place
+     they are SHOWN — the inventory screen puts a thumbnail on every
+     stocked row, and its rows come from a different query. Invalidating
+     only the menu left a newly added photo invisible on the page the
+     person was most likely looking at when they added it. */
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: menuQueryKey });
+    queryClient.invalidateQueries({ queryKey: ["inventory"] });
+    queryClient.invalidateQueries({ queryKey: ["stockable-items"] });
+  };
+
+  /* attachMenuItemImage(), not uploadMenuItemImage().
+
+     The latter only puts the file in the bucket and returns its URL —
+     the menu_item_images row is a separate call. This hook used to make
+     just that upload and then report success, so adding a photo to an
+     existing item left a file in storage, no row, and a green toast for
+     a photo that never appeared. Both halves now happen in one place,
+     and a failed insert takes the orphaned file with it. */
   const { isLoading: isUploading, mutate: uploadImage } = useMutation({
-    mutationFn: async (file) => {
-      const sortOrder = await getNextImageSortOrder(menuItemId);
-      return uploadMenuItemImage({ file, menuItemId, sortOrder });
-    },
-    onSuccess: () => {
-      toast.success("Photo uploaded");
+    mutationFn: (file) => attachMenuItemImage({ file, menuItemId }),
+    onSuccess: ({ isPrimary }) => {
+      toast.success(
+        isPrimary ? "Photo added — it is now the main one" : "Photo added",
+      );
       invalidate();
     },
     onError: (err) => toast.error(err.message),

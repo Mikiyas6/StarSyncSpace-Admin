@@ -2,6 +2,8 @@ import { useSearchParams } from "react-router-dom";
 import { format, subDays } from "date-fns";
 import styled, { css } from "styled-components";
 import Filter from "../../ui/Filter";
+import { GRANULARITY_OPTIONS } from "./revenue";
+import { useGranularity } from "./useRevenue";
 
 const FilterGroup = styled.div`
   display: flex;
@@ -64,8 +66,20 @@ const Dash = styled.span`
   color: var(--color-grey-400);
 `;
 
+const Divider = styled.span`
+  width: 1px;
+  align-self: stretch;
+  background-color: var(--color-grey-200);
+  margin: 0 0.4rem;
+`;
+
 function DashboardFilter() {
   const [searchParams, setSearchParams] = useSearchParams();
+  /* How finely the revenue chart slices the range. Read here rather than
+     from the URL directly so that the chip shown as active is the one the
+     chart is actually using — including when nothing is in the URL and
+     the granularity is being chosen from the length of the range. */
+  const { granularity } = useGranularity();
 
   const isCustom =
     searchParams.get("last") === "custom" ||
@@ -118,6 +132,18 @@ function DashboardFilter() {
       >
         Custom
       </ChipButton>
+
+      <Divider />
+
+      {/* Per day / week / month / year. Beside the range rather than on
+          the chart, because the two together are one question — "how much
+          did we take, and over what" — and a control that lives on the
+          chart is invisible until you scroll to it. */}
+      <Filter
+        filterField="per"
+        activeValue={granularity}
+        options={GRANULARITY_OPTIONS}
+      />
 
       {isCustom && (
         <DateRangeInputs>

@@ -86,10 +86,15 @@ function MenuTable({ categoryId }) {
       );
     }
 
+    /* Hidden wins over both, the same way the row's badge does. An item
+       nobody can see is not "Available only" whatever its is_available
+       says, and listing it there is how one gets left hidden for a
+       month without anybody noticing. */
     if (availability === "available")
-      items = items.filter((i) => i.is_available);
+      items = items.filter((i) => i.is_available && !i.is_hidden);
     if (availability === "unavailable")
-      items = items.filter((i) => !i.is_available);
+      items = items.filter((i) => !i.is_available && !i.is_hidden);
+    if (availability === "hidden") items = items.filter((i) => i.is_hidden);
 
     return items;
   }, [overview, categoryId, query, availability]);
@@ -117,6 +122,7 @@ function MenuTable({ categoryId }) {
             { value: "all", label: "All items" },
             { value: "available", label: "Available only" },
             { value: "unavailable", label: "Sold out only" },
+            { value: "hidden", label: "Hidden only" },
           ]}
           aria-label="Filter by availability"
         />

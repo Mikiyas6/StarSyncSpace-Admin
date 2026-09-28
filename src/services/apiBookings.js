@@ -6,6 +6,11 @@ import {
   needsStatusAdvance,
   validateAdminBooking,
 } from "../utils/booking";
+import {
+  passWindow,
+  seatsTakenAcrossRange,
+  validateSeatBooking,
+} from "../utils/spaces";
 
 export async function getBookings(filter, sortBy, page) {
   let query = supabase
@@ -381,4 +386,280 @@ export async function reconcileBookingStatuses(now = new Date()) {
   }
 
   return { updated };
+}
+
+/* ------------------------------------------------------------------
+   Bookings, for the revenue screens.
+
+   Distinct from getBookingsAfterDate() above, which selects only
+   created_at, totalPrice and extrasPrice — enough for a single "sales"
+   line and nothing else. Splitting the takings by room and by KIND of
+   room needs four more things:
+
+     roomId + rooms(name, room_type)  which room, and which business it
+                                      belongs to — meeting room or
+                                      shared space
+     amount_rwf                       what was actually CHARGED, frozen
+                                      at payment. The revenue module
+                                      prefers this over converting
+                                      totalPrice, so that last month's
+                                      figures do not move when the
+                                      exchange rate does
+     status + isPaid                   whether this is money at all: a
+                                      pending payment is not, and a
+                                      paid-then-cancelled booking is,
+                                      because the terms are
+                                      non-refundable
+
+   `rooms` is a join rather than a second query so that a room renamed
+   since a booking was taken still reports under its current name, and so
+   that one round trip answers the whole screen.
+   ------------------------------------------------------------------ */
+export async function getRevenueBookings(
+  from,
+  to = getToday({ end: true }),
+) {
+  const { data, error } = await supabase
+    .from("bookings")
+    .select(
+      `id, created_at, startTime, endTime, status, isPaid,
+       totalPrice, extrasPrice, amount_rwf, seats, pass_type, "roomId",
+       rooms ( id, name, room_type )`,
+    )
+    .gte("created_at", from)
+    .lte("created_at", to)
+    .order("created_at");
+
+  if (error) {
+    /* 42703 is "column does not exist": seats/pass_type arrive with the
+       shared-spaces migration, and room_type with it. Rather than taking
+       the whole dashboard down before it has been run, fall back to the
+       columns that have always been there — the revenue module already
+       treats an untyped room as a meeting room, which is exactly what
+       every booking in the table is until shared spaces exist. */
+    if (error.code === "42703") {
+      const { data: legacy, error: legacyError } = await supabase
+        .from("bookings")
+        .select(
+          `id, created_at, startTime, endTime, status, isPaid,
+           totalPrice, extrasPrice, amount_rwf, "roomId",
+           rooms ( id, name )`,
+        )
+        .gte("created_at", from)
+        .lte("created_at", to)
+        .order("created_at");
+
+      if (legacyError) {
+        console.error(legacyError);
+        throw new Error("Bookings could not get loaded");
+      }
+      return legacy ?? [];
+    }
+
+    console.error(error);
+    throw new Error("Bookings could not get loaded");
+  }
+
+  return data ?? [];
+}
+
+/* ------------------------------------------------------------------
+   Selling a desk at the front counter.
+
+   The shared-space counterpart to createBookingApi above, and separate
+   from it for the same reason the two forms are separate: almost none of
+   a meeting room's rules apply. There is no turnaround gap, no opening-
+   hours gate, no length in minutes — and crucially, no overlap check,
+   because overlapping is the product. Twenty people are meant to hold
+   desks at once; the only invalid state is the twenty-first.
+
+   What replaces all of it is one question — are there enough seats free
+   on every day of the range — answered by validateSeatBooking, which is
+   the same function the form prices and draws "14 of 20 left" from, and
+   which the database's own seat trigger independently agrees with.
+
+   The desk's one liberty over the public site: allowToday. A walk-in at
+   two in the afternoon wants a desk for the rest of today.
+   ------------------------------------------------------------------ */
+
+// Every booking that could compete for a seat in this room over a range.
+// Deliberately not windowed the way getRoomBookingsAround is: a monthly
+// pass bought five weeks ago is still holding its desk today, so a window
+// measured in days would miss exactly the bookings that matter most.
+export async function getRoomSeatBookings(roomId) {
+  const { data, error } = await supabase
+    .from("bookings")
+    .select("id, startTime, endTime, status, seats")
+    .eq("roomId", roomId)
+    .not("status", "in", "(cancelled,no-show,failed)")
+    .order("startTime");
+
+  if (error) {
+    console.error("[getRoomSeatBookings]", error);
+    throw new Error("Existing desk bookings could not be checked");
+  }
+  return data ?? [];
+}
+
+export async function createSeatBookingApi({
+  roomId,
+  guestId,
+  room,
+  startDate,
+  passType,
+  units = 1,
+  /* Hourly only: the length in minutes. Ignored for a day or month pass,
+     whose length comes from `units`. */
+  minutes,
+  seats = 1,
+  rwfPerUsd,
+  observations = "",
+  isPaid = false,
+  status = "booked",
+}) {
+  if (!roomId) throw new Error("Pick a space");
+  if (!guestId) throw new Error("Pick or create a guest");
+
+  // Re-read immediately before writing, so two desks cannot both sell the
+  // last seat between a render and a submit.
+  const existing = await getRoomSeatBookings(roomId);
+
+  const window = passWindow({ startDate, passType, units, minutes });
+  if (!window) throw new Error("Pick a valid start date");
+
+  const seatsTaken = seatsTakenAcrossRange(
+    room,
+    existing,
+    window.start,
+    window.end,
+  );
+
+  const { error: invalid, value } = validateSeatBooking({
+    room,
+    seats,
+    passType,
+    startDate,
+    units,
+    minutes,
+    seatsTaken,
+    rate: rwfPerUsd,
+    // The whole point of this form: somebody is standing here now.
+    allowToday: true,
+  });
+  if (invalid) throw new Error(invalid);
+
+  const newBooking = {
+    roomId,
+    guestId,
+    startTime: value.start.toISOString(),
+    endTime: value.end.toISOString(),
+    duration_minutes: value.durationMinutes,
+    numHours: Math.max(1, Math.round(value.durationMinutes / 60)),
+    /* numGuests is "how many people are coming", seats is "how much of
+       the room's capacity was bought". For a desk pass they are the same
+       number; both are written so neither silently reads as 1. */
+    numGuests: value.seats,
+    seats: value.seats,
+    pass_type: value.passType,
+    observations: String(observations ?? "").slice(0, 1000),
+    cabinPrice: value.usd,
+    extrasPrice: 0,
+    totalPrice: value.usd,
+    /* Frozen at the moment of sale. This is what the customer paid, and
+       it must never be re-derived from a later exchange rate — see the
+       note at the top of utils/fx.js. */
+    amount_rwf: value.rwf,
+    isPaid,
+    status,
+  };
+
+  const { data, error } = await supabase
+    .from("bookings")
+    .insert([newBooking])
+    .select("*, rooms(name), guests(fullName, email)")
+    .single();
+
+  if (error) {
+    console.error("[createSeatBookingApi]", error, "payload:", newBooking);
+    /* 23514 is the seat-capacity trigger, whose own message already names
+       the room and both counts ("Only 2 of 20 seats are free in Shared
+       Space 01 ... 4 requested") — better than anything written here. */
+    if (error.code === "23514") throw new Error(error.message);
+    if (error.code === "42703")
+      throw new Error(
+        "Desk bookings need the shared-spaces migration. Run supabase/01-shared-spaces.sql and 02-seat-limit.sql, then reload.",
+      );
+    /* 23P01 is no_overlapping_bookings — the rule that one meeting room
+       cannot be let twice over the same hours. Reaching it on a DESK
+       means the constraint has not been narrowed to whole-room bookings
+       yet, and a shared space is being held to a rule that contradicts
+       what it sells. Nothing about this sale is wrong, so it must not
+       read as "those dates are taken". */
+    if (error.code === "23P01")
+      throw new Error(
+        "This space is still under the old one-booking-at-a-time rule, so a second desk cannot be sold over the same hours. Run supabase/08-shared-space-overlap.sql, then try again.",
+      );
+    throw new Error(
+      `The desk booking could not be created (${error.message ?? "unknown error"})`,
+    );
+  }
+
+  return data;
+}
+
+/* ------------------------------------------------------------------
+   Every booking that touches a window, across every room.
+
+   The one query behind the availability search. Deliberately NOT
+   getRoomBookingsAround() called once per room: the desk asks "what is
+   free at four" about the whole building at once, and eight or forty
+   round trips per keystroke is a different kind of application.
+
+   FILTERED ON BOTH ENDS, which the per-room reader above cannot be. It
+   windows on startTime alone and then pads the window by three days at
+   each end to catch a long booking that began before it — a workaround
+   for not being able to say "overlaps". Here the half-open overlap test
+   is expressible directly: a booking touches [from, to) when it starts
+   before `to` and ends after `from`. That catches a 24-hour meeting room
+   booking, and a monthly desk bought five weeks ago, without reading a
+   day of bookings either side and without a padding constant that has to
+   be guessed at.
+
+   `guests(fullName)` rides along because a busy room is half an answer:
+   the desk wants to know who has it, so it can ask whether they are
+   nearly done.
+   ------------------------------------------------------------------ */
+export async function getBookingsInRange(from, to) {
+  const fromIso = new Date(from).toISOString();
+  const toIso = new Date(to).toISOString();
+
+  const columns = `id, "roomId", startTime, endTime, status, seats, pass_type,
+       numGuests, guests ( fullName )`;
+
+  const run = (select) =>
+    supabase
+      .from("bookings")
+      .select(select)
+      .lt("startTime", toIso)
+      .gt("endTime", fromIso)
+      .order("startTime");
+
+  let { data, error } = await run(columns);
+
+  /* 42703 is "column does not exist": seats and pass_type arrive with the
+     shared-spaces migration. Falling back keeps the search working on a
+     database that has not had it run yet — every booking there is a
+     whole-room booking, and seatsTakenOverWindow() already treats a
+     missing `seats` as one. */
+  if (error?.code === "42703") {
+    ({ data, error } = await run(
+      `id, "roomId", startTime, endTime, status, numGuests, guests ( fullName )`,
+    ));
+  }
+
+  if (error) {
+    console.error("[getBookingsInRange]", error);
+    throw new Error("Availability could not be checked");
+  }
+  return data ?? [];
 }

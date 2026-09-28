@@ -18,6 +18,27 @@ export function toLocalInputValue(date) {
   )}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+/* The same wall clock, split the way the two narrower inputs want it:
+   <input type="date"> takes "YYYY-MM-DD" and <input type="time"> takes
+   "HH:mm". A desk pass is picked as a date and, when it is sold by the
+   hour, a time — so it needs both halves separately rather than the
+   datetime-local string above.
+
+   Built from the local getters for the same reason: toISOString() is
+   UTC, and slicing a date out of it lands on yesterday for anything
+   before 2am in Kigali. */
+export function toLocalDateValue(date) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
+    date.getDate(),
+  )}`;
+}
+
+export function toLocalTimeValue(date) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 /* The inverse. An empty or half-typed value is a normal state on the way
    to a filled-in one, not an error, so it comes back as null rather than
    as an Invalid Date that every caller then has to test for. */

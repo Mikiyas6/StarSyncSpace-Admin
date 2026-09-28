@@ -55,6 +55,18 @@ const GlobalStyles = createGlobalStyle`
   --color-gold-600: #b38a34;
   --color-teal-500: #2aae9b;
 
+  /* Chart series, in fixed order: meeting rooms, shared spaces, snacks.
+     Their own tokens rather than reused UI colours, because the UI
+     palette is not a categorical one - brand-600 and indigo-700 are both
+     near-black here and would read as one series. These three were
+     checked with the dataviz validator against this surface: lightness
+     band, chroma floor, colour-blind separation and contrast all pass,
+     and the ORDER matters because the check is on adjacent pairs.
+     The dark theme redefines all three; it is a chosen set, not a flip. */
+  --color-chart-1: #15803d;
+  --color-chart-2: #0369a1;
+  --color-chart-3: #b45309;
+
   --backdrop-color: rgba(255, 255, 255, 0.1);
   
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
@@ -91,6 +103,12 @@ const GlobalStyles = createGlobalStyle`
   --color-gold-500: #d8ac52;
   --color-gold-600: #e5c480;
   --color-teal-500: #2aae9b;
+
+  /* The same three series, re-stepped for the dark surface and validated
+     against it rather than lightened from the light set. */
+  --color-chart-1: #1f9e63;
+  --color-chart-2: #2b7fc4;
+  --color-chart-3: #b8801a;
 
   --color-blue-100: #0f1c2e;
   --color-blue-700: #7cc3ee;

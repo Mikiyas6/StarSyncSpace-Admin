@@ -9,6 +9,7 @@ import {
   uploadMenuItemImage,
 } from "../../services/apiMenu";
 import { menuQueryKey } from "./useMenuOverview";
+import { refreshPublicMenu } from "./refreshPublicMenu";
 
 export function useCreateMenuItem() {
   const queryClient = useQueryClient();
@@ -35,6 +36,10 @@ export function useCreateMenuItem() {
                 menu_item_id: item.id,
                 url,
                 sort_order: sortOrder,
+                /* The first photo is the card image. Without this a
+                   brand new item has a gallery and a blank card until
+                   somebody goes back and stars one. */
+                is_primary: sortOrder === 0,
               }))
             );
           }
@@ -60,6 +65,11 @@ export function useCreateMenuItem() {
             : `${item.name} added`
         );
         queryClient.invalidateQueries({ queryKey: menuQueryKey });
+        refreshPublicMenu();
+        /* A new stocked item has to reach the inventory screens too —
+           it can now be created from one of them. */
+        queryClient.invalidateQueries({ queryKey: ["stockable-items"] });
+        queryClient.invalidateQueries({ queryKey: ["inventory"] });
       },
       onError: (err) => toast.error(err.message),
     });

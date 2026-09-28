@@ -5,7 +5,16 @@ import ExistingImagesManager from "./ExistingImagesManager";
 import { useDeleteMenuItem } from "./useDeleteMenuItem";
 import { useDuplicateMenuItem } from "./useDuplicateMenuItem";
 import { useToggleMenuItemFlag } from "./useToggleMenuItemFlag";
-import { Copy, ImageIcon, PackageCheck, Pencil, Trash2, Star } from "lucide-react";
+import {
+  Copy,
+  Eye,
+  EyeOff,
+  ImageIcon,
+  PackageCheck,
+  Pencil,
+  Trash2,
+  Star,
+} from "lucide-react";
 import ConfirmDelete from "../../ui/ConfirmDelete";
 import Modal from "../../ui/Modal";
 import Table from "../../ui/Table";
@@ -106,9 +115,16 @@ function MenuRow({ item, sectionName }) {
       <Price>{formatMenuPrice(item.price, item.currency)}</Price>
 
       <Tags>
-        <Tag type={item.is_available ? "green" : "red"}>
-          {item.is_available ? "Available" : "Sold out"}
-        </Tag>
+        {/* Hidden first and on its own: an item nobody can see is not
+            also "Available", and showing both invites the reading that
+            it is on the menu. */}
+        {item.is_hidden ? (
+          <Tag type="silver">Hidden</Tag>
+        ) : (
+          <Tag type={item.is_available ? "green" : "red"}>
+            {item.is_available ? "Available" : "Sold out"}
+          </Tag>
+        )}
         {item.is_featured && <Tag type="brand">Featured</Tag>}
       </Tags>
 
@@ -155,6 +171,24 @@ function MenuRow({ item, sectionName }) {
                 {item.is_available ? "Mark sold out" : "Mark available"}
               </Menus.Button>
 
+              {/* Next to "Mark sold out" because that is the one it
+                  keeps being confused with, and the difference is worth
+                  seeing side by side: sold out leaves the item on the
+                  customer's menu, greyed. This takes it off. */}
+              <Menus.Button
+                icon={item.is_hidden ? <Eye /> : <EyeOff />}
+                onClick={() =>
+                  toggleFlag({
+                    id: item.id,
+                    flag: "is_hidden",
+                    value: !item.is_hidden,
+                  })
+                }
+                disabled={isToggling}
+              >
+                {item.is_hidden ? "Show on menu" : "Hide from menu"}
+              </Menus.Button>
+
               <Menus.Button
                 icon={<Copy />}
                 onClick={handleDuplicate}
@@ -184,8 +218,18 @@ function MenuRow({ item, sectionName }) {
           </Modal.Window>
 
           <Modal.Window name="delete-item">
+            {/* Not "permanently" — that is only true for an item that
+                has never traded. One that has is archived instead, and a
+                dialog that overstates what it does gets dismissed
+                unread.
+
+                It also names Hide, because this dialog is where people
+                discover they wanted that instead. */}
             <ConfirmDelete
               resourceName={`"${item.name}"`}
+              title={`Remove "${item.name}"`}
+              description={`Take "${item.name}" off the menu for good and out of every room's stock list? Its sales history is kept either way. Any room that still holds stock of it has to be cleared first. To take it off the customer menu and keep everything as it is, close this and choose "Hide from menu".`}
+              confirmLabel="Remove"
               disabled={isDeleting}
               onConfirm={() => deleteMenuItem(item.id)}
             />

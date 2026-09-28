@@ -9,7 +9,8 @@ import { useForm } from "react-hook-form";
 import { useCreateRoom } from "./useCreateRoom";
 import { useEditRoom } from "./useEditRoom";
 import RoomImagesManager from "./RoomImagesManager";
-import { formatRwfPerMinute } from "../../utils/helpers";
+import { formatMenuPrice } from "../../utils/helpers";
+import { useFxRate } from "../fx/useFxRate";
 const FormRow = styled.div`
   display: grid;
   align-items: center;
@@ -50,6 +51,14 @@ const Hint = styled.span`
   font-size: 1.4rem;
   color: var(--color-grey-500);
 `;
+/* "" from an untouched number input is not 0 and is not a number;
+   Postgres refuses it in a numeric column. */
+function numberOrNull(value) {
+  if (value === "" || value === null || value === undefined) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function CreateRoomForm({ roomToEdit = {}, onCloseModal }) {
   const { id: editId, ...editValues } = roomToEdit;
   const isEditSession = Boolean(editId);
@@ -63,8 +72,48 @@ function CreateRoomForm({ roomToEdit = {}, onCloseModal }) {
   const { errors } = formState;
   const watchedPrice = watch("regularPrice");
 
+  /* A room is one of two completely different products, and which one it
+     is decides which prices even make sense. Watched rather than read
+     once, so the form reshapes itself as soon as the type changes instead
+     of asking for an hourly rate for a desk. */
+  const roomType = watch("room_type") ?? editValues.room_type ?? "meeting_room";
+  const isSharedSpace = roomType === "shared_space";
+
+  const watchedHourRate = watch("hour_rate_rwf");
+  const watchedDayRate = watch("day_rate_rwf");
+  const watchedMonthRate = watch("month_rate_usd");
+
+  /* The live rate, so every "≈" on this form is today's conversion rather
+     than a number that was true when the code was written. */
+  const { rate: rwfPerUsd, isIndicative } = useFxRate();
+
   function onSubmit(data) {
-    const image = typeof data.image === "string" ? data.image : data.image[0];
+    /* Three shapes arrive here. A string is the photo the room already
+       has and nobody replaced. A FileList with something in it is a new
+       upload. A FileList with NOTHING in it is what the browser leaves
+       behind when the file dialog is opened and cancelled — and reading
+       [0] off that gave undefined, which used to reach the API layer and
+       throw on `.name` rather than simply keeping the photo the room
+       already had. */
+    const picked =
+      typeof data.image === "string" ? data.image : data.image?.[0];
+    const image = picked ?? (isEditSession ? roomToEdit.image : undefined);
+
+    /* Null out whichever rates do not belong to this kind of room.
+
+       Leaving a stale number behind is how a shared space ends up
+       advertising an hourly price on the public site, or a meeting room
+       shows a daily desk rate it does not sell. A blank input arrives as
+       "", which Postgres will not accept in a numeric column, so the
+       empty case has to become null rather than being passed through. */
+    const shared = data.room_type === "shared_space";
+    // The discount input is not rendered for a shared space, so nothing
+    // would arrive for a NOT NULL column.
+    if (shared) data.discount = 0;
+    data.hour_rate_rwf = shared ? numberOrNull(data.hour_rate_rwf) : null;
+    data.day_rate_rwf = shared ? numberOrNull(data.day_rate_rwf) : null;
+    data.month_rate_usd = shared ? numberOrNull(data.month_rate_usd) : null;
+    if (shared) data.regularPrice = 0;
     if (isEditSession)
       editRoom(
         { newRoomData: { ...data, image }, id: editId },
@@ -103,7 +152,39 @@ function CreateRoomForm({ roomToEdit = {}, onCloseModal }) {
         {errors?.name?.message && <Error>{errors.name.message}</Error>}
       </FormRow>
       <FormRow>
-        <label htmlFor="maxCapacity">Maximum capacity</label>
+        <label htmlFor="room_type">What kind of space is this?</label>
+        <select
+          id="room_type"
+          disabled={isWorking}
+          {...register("room_type")}
+          style={{
+            fontSize: "1.4rem",
+            padding: "0.8rem 1.2rem",
+            border: "1px solid var(--color-grey-300)",
+            borderRadius: "var(--border-radius-sm)",
+            backgroundColor: "var(--color-grey-0)",
+            color: "var(--color-grey-700)",
+            fontWeight: 500,
+          }}
+        >
+          <option value="meeting_room">
+            Meeting room — rented whole, by the minute
+          </option>
+          <option value="shared_space">
+            Shared space — sold one seat at a time
+          </option>
+        </select>
+        <Hint>
+          {isSharedSpace
+            ? "Booking a seat leaves the room available to everyone else — it just has one desk fewer. The public site shows how many are left."
+            : "Booking this room makes it unavailable for its whole slot."}
+        </Hint>
+      </FormRow>
+
+      <FormRow>
+        <label htmlFor="maxCapacity">
+          {isSharedSpace ? "How many desks?" : "Maximum capacity"}
+        </label>
         <Input
           disabled={isWorking}
           type="number"
@@ -116,49 +197,183 @@ function CreateRoomForm({ roomToEdit = {}, onCloseModal }) {
             },
           })}
         />
-        {errors?.maxCapacity?.message && (
+        {errors?.maxCapacity?.message ? (
           <Error>{errors.maxCapacity.message}</Error>
-        )}
-      </FormRow>
-      <FormRow>
-        <label htmlFor="regularPrice">
-          Price per hour (USD) — clients are billed per minute, converted to
-          RWF automatically
-        </label>
-        <Input
-          disabled={isWorking}
-          type="number"
-          step="0.01"
-          id="regularPrice"
-          {...register("regularPrice", {
-            required: "This field is required",
-            min: { value: 0.01, message: "Price must be greater than 0" },
-          })}
-        />
-        {errors?.regularPrice?.message ? (
-          <Error>{errors.regularPrice.message}</Error>
-        ) : watchedPrice ? (
+        ) : isSharedSpace ? (
           <Hint>
-            ≈ ${(watchedPrice / 60).toFixed(2)}/min ·{" "}
-            {formatRwfPerMinute(watchedPrice / 60)}/min
+            This is the seat count every &ldquo;14 of 20 seats left&rdquo; is
+            worked out from, and the limit the database refuses to oversell.
           </Hint>
         ) : null}
       </FormRow>
-      <FormRow>
-        <label htmlFor="discount">Discount</label>
-        <Input
-          disabled={isWorking}
-          type="number"
-          id="discount"
-          {...register("discount", {
-            required: "This field is required",
-            validate: (value) =>
-              value <= getValues().regularPrice ||
-              "Discount should be less than regular price",
-          })}
-        />
-        {errors?.discount?.message && <Error>{errors.discount.message}</Error>}
-      </FormRow>
+      {/* Two products, two ways of charging. Only the one that applies is
+          shown, because an hourly rate on a hot desk and a monthly pass on
+          a boardroom are both prices nobody can buy. */}
+      {isSharedSpace ? (
+        <>
+          <FormRow>
+            <label htmlFor="hour_rate_rwf">
+              By the hour — price of ONE SEAT for ONE HOUR (RWF)
+            </label>
+            <Input
+              disabled={isWorking}
+              type="number"
+              step="1"
+              min="0"
+              id="hour_rate_rwf"
+              {...register("hour_rate_rwf")}
+            />
+            {watchedHourRate && watchedDayRate ? (
+              <Hint>
+                A day pass becomes the better buy after{" "}
+                {(watchedDayRate / watchedHourRate).toFixed(1)} hours — past
+                that, both apps offer the guest the day pass instead of
+                charging more for less.
+              </Hint>
+            ) : (
+              <Hint>
+                Leave this empty if this space is not sold by the hour — the
+                option then disappears from both the website and the booking
+                form rather than failing when somebody picks it.
+              </Hint>
+            )}
+          </FormRow>
+
+          <FormRow>
+            <label htmlFor="day_rate_rwf">
+              Day pass — price of ONE SEAT for ONE DAY (RWF)
+            </label>
+            <Input
+              disabled={isWorking}
+              type="number"
+              step="1"
+              min="0"
+              id="day_rate_rwf"
+              {...register("day_rate_rwf", {
+                required: "A shared space needs a daily seat rate",
+                min: { value: 1, message: "Rate must be greater than 0" },
+              })}
+            />
+            {errors?.day_rate_rwf?.message ? (
+              <Error>{errors.day_rate_rwf.message}</Error>
+            ) : watchedDayRate ? (
+              <Hint>
+                ≈ ${(watchedDayRate / rwfPerUsd).toFixed(2)} per seat per day
+                {isIndicative ? " (indicative rate)" : ""} · a full room of{" "}
+                {watch("maxCapacity") || 0} seats is{" "}
+                {formatMenuPrice(
+                  watchedDayRate * (Number(watch("maxCapacity")) || 0),
+                  "RWF",
+                )}{" "}
+                a day
+              </Hint>
+            ) : (
+              <Hint>
+                Quoted in RWF because that is what customers pay. The USD
+                figure beside it is derived from today&apos;s exchange rate and
+                is never stored.
+              </Hint>
+            )}
+          </FormRow>
+
+          <FormRow>
+            <label htmlFor="month_rate_usd">
+              Monthly desk — price of ONE SEAT for ONE MONTH (USD)
+            </label>
+            <Input
+              disabled={isWorking}
+              type="number"
+              step="0.01"
+              min="0"
+              id="month_rate_usd"
+              {...register("month_rate_usd", {
+                required: "A shared space needs a monthly seat rate",
+                min: { value: 0.01, message: "Rate must be greater than 0" },
+              })}
+            />
+            {errors?.month_rate_usd?.message ? (
+              <Error>{errors.month_rate_usd.message}</Error>
+            ) : watchedMonthRate ? (
+              <Hint>
+                ≈{" "}
+                {formatMenuPrice(
+                  Math.round(watchedMonthRate * rwfPerUsd),
+                  "RWF",
+                )}{" "}
+                per seat per month, at today&apos;s rate of{" "}
+                {Math.round(rwfPerUsd).toLocaleString("en-US")} RWF to the
+                dollar{isIndicative ? " (indicative)" : ""}
+                {watchedDayRate
+                  ? ` — about ${Math.round(
+                      (watchedMonthRate * rwfPerUsd) / watchedDayRate,
+                    )} days' worth of day passes`
+                  : ""}
+              </Hint>
+            ) : (
+              <Hint>
+                Quoted in USD because that is how it was priced. What a
+                customer sees in RWF is converted at the live rate, so it
+                stays right as the rate moves.
+              </Hint>
+            )}
+          </FormRow>
+        </>
+      ) : (
+        <FormRow>
+          <label htmlFor="regularPrice">
+            Price per hour (USD) — clients are billed per minute, converted to
+            RWF automatically
+          </label>
+          <Input
+            disabled={isWorking}
+            type="number"
+            step="0.01"
+            id="regularPrice"
+            {...register("regularPrice", {
+              required: "This field is required",
+              min: { value: 0.01, message: "Price must be greater than 0" },
+            })}
+          />
+          {errors?.regularPrice?.message ? (
+            <Error>{errors.regularPrice.message}</Error>
+          ) : watchedPrice ? (
+            <Hint>
+              ≈ ${(watchedPrice / 60).toFixed(2)}/min ·{" "}
+              {formatMenuPrice(
+                Math.round((watchedPrice / 60) * rwfPerUsd),
+                "RWF",
+              )}
+              /min, at today&apos;s rate
+              {isIndicative ? " (indicative)" : ""}
+            </Hint>
+          ) : null}
+        </FormRow>
+      )}
+      {/* Discount is a reduction on the HOURLY price, and a shared space
+          has no hourly price — with regularPrice forced to 0, the old
+          "discount must be less than the price" rule could only ever be
+          satisfied by 0, so a required field became an unanswerable
+          question. Seat passes are discounted by the monthly rate itself,
+          which is already a fraction of the daily one. */}
+      {isSharedSpace ? null : (
+        <FormRow>
+          <label htmlFor="discount">Discount</label>
+          <Input
+            disabled={isWorking}
+            type="number"
+            id="discount"
+            {...register("discount", {
+              required: "This field is required",
+              validate: (value) =>
+                Number(value) <= Number(getValues().regularPrice) ||
+                "Discount should be less than regular price",
+            })}
+          />
+          {errors?.discount?.message && (
+            <Error>{errors.discount.message}</Error>
+          )}
+        </FormRow>
+      )}
       <FormRow>
         <label htmlFor="description">Description for website</label>
         <Textarea

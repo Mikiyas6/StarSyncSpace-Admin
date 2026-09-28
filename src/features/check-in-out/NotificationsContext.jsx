@@ -10,6 +10,7 @@ import { useQuery } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import styled from "styled-components";
 import { getActiveBookingsEndingSoon } from "../../services/apiBookings";
+import { useRestockAlerts } from "../inventory/useRestockAlerts";
 
 const TEN_MINUTES = 10 * 60 * 1000;
 const POLL_INTERVAL = 30 * 1000;
@@ -69,6 +70,20 @@ function NotificationsProvider({ children }) {
   const timers = useRef(new Set());
   const latestData = useRef([]);
   const toasted = useRef(new Set());
+
+  /* Which rooms need restocking, and what with. Polled on its own much
+     slower clock — a fridge does not empty in thirty seconds — and kept
+     as a separate list rather than merged into `notifications`, because
+     the two have genuinely different lifecycles: a booking alert expires
+     when the booking ends, a restock alert lives until somebody actually
+     restocks the shelf. Merging them would mean inventing an expiry for
+     the second one. */
+  const { alerts: restockAlerts } = useRestockAlerts();
+
+  /* Seen state, keyed by the alert's stable room+item id, so marking the
+     bell read does not un-mark itself two minutes later when the poll
+     returns the same shelf still empty. */
+  const [seenRestock, setSeenRestock] = useState(() => new Set());
 
   const { data } = useQuery({
     queryKey: ["room-leaving-notifications"],
@@ -179,6 +194,18 @@ function NotificationsProvider({ children }) {
     }
   }, [notifications, location.pathname, navigate]);
 
+  /* Once a shelf is back above its target it drops out of `restockAlerts`
+     entirely, and its seen-ness has to go with it — otherwise the next
+     time it runs low the bell would count it as already read, because
+     the id would still be sitting in the set from last week. */
+  useEffect(() => {
+    setSeenRestock((prev) => {
+      const liveIds = new Set(restockAlerts.map((a) => a.id));
+      const next = new Set([...prev].filter((id) => liveIds.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [restockAlerts]);
+
   useEffect(() => {
     const current = timers.current;
     return () => {
@@ -187,15 +214,34 @@ function NotificationsProvider({ children }) {
     };
   }, []);
 
+  /* The ids as of the last render, read inside markAllSeen without
+     putting `restockAlerts` in its dependency list — the callback is
+     passed to the bell, and a new identity on every poll would re-render
+     it every two minutes for no reason. */
+  const restockAlertIdsRef = useRef([]);
+  restockAlertIdsRef.current = restockAlerts.map((a) => a.id);
+
   const markAllSeen = useCallback(() => {
     setNotifications((prev) => prev.map((n) => ({ ...n, seen: true })));
+    setSeenRestock(new Set(restockAlertIdsRef.current));
   }, []);
 
-  const unreadCount = notifications.filter((n) => !n.seen).length;
+  const unseenRestock = restockAlerts.filter((a) => !seenRestock.has(a.id));
+
+  /* One number on one bell. Somebody at the desk has a single question —
+     is there anything I need to deal with — and two separate badges
+     would make them ask it twice. */
+  const unreadCount =
+    notifications.filter((n) => !n.seen).length + unseenRestock.length;
 
   return (
     <NotificationsContext.Provider
-      value={{ notifications, unreadCount, markAllSeen }}
+      value={{
+        notifications,
+        restockAlerts,
+        unreadCount,
+        markAllSeen,
+      }}
     >
       {children}
     </NotificationsContext.Provider>

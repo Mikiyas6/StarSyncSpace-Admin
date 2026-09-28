@@ -4,6 +4,10 @@ import { HiOutlineBell } from "react-icons/hi2";
 import styled from "styled-components";
 import { useOutsideClick } from "../hooks/useOutsideClick";
 import { useNotifications } from "../features/check-in-out/useNotifications";
+import {
+  restockAlertText,
+  restockAlertTitle,
+} from "../features/inventory/useRestockAlerts";
 
 const BellWrapper = styled.div`
   position: relative;
@@ -113,6 +117,32 @@ const ViewButton = styled.button`
   }
 `;
 
+/* A heading per kind. Two lists under one bell need labelling, or a
+   "Meeting Room 02" about a client leaving and a "Meeting Room 02" about
+   an empty shelf are indistinguishable at a glance. */
+const GroupHead = styled.div`
+  padding: 0.8rem 2.4rem;
+  font-size: 1.2rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-grey-500);
+  background-color: var(--color-grey-50);
+  border-bottom: 1px solid var(--color-grey-100);
+`;
+
+/* Out of stock is red, running low is yellow — the same two colours the
+   inventory page uses for the same two states, so the bell and the page
+   are obviously talking about the same thing. */
+const Dot = styled.span`
+  width: 0.8rem;
+  height: 0.8rem;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background-color: ${(props) =>
+    props.$out ? "var(--color-red-700)" : "var(--color-yellow-700)"};
+`;
+
 const EmptyText = styled.p`
   padding: 2.4rem;
   text-align: center;
@@ -128,7 +158,8 @@ function minutesLeft(endTime) {
 }
 
 function NotificationBell() {
-  const { notifications, unreadCount, markAllSeen } = useNotifications();
+  const { notifications, restockAlerts, unreadCount, markAllSeen } =
+    useNotifications();
   const [open, setOpen] = useState(false);
   const ref = useOutsideClick(() => setOpen(false), false);
   const navigate = useNavigate();
@@ -152,26 +183,56 @@ function NotificationBell() {
       {open && (
         <Dropdown>
           <DropdownHeader>Notifications</DropdownHeader>
+
           {notifications.length > 0 ? (
-            notifications.map((n) => (
-              <Item key={n.id}>
-                <div>
-                  <strong>Room {n.roomName ?? "—"}</strong>
-                  <span>
-                    {n.guestName} •{" "}
-                    {minutesLeft(n.endTime) === 0
-                      ? "leaving now"
-                      : `${minutesLeft(n.endTime)} min left`}
-                  </span>
-                </div>
-                <ViewButton onClick={() => navigate(`/bookings/${n.id}`)}>
-                  View
-                </ViewButton>
-              </Item>
-            ))
-          ) : (
+            <>
+              <GroupHead>Rooms ending soon</GroupHead>
+              {notifications.map((n) => (
+                <Item key={n.id}>
+                  <div>
+                    <strong>Room {n.roomName ?? "—"}</strong>
+                    <span>
+                      {n.guestName} •{" "}
+                      {minutesLeft(n.endTime) === 0
+                        ? "leaving now"
+                        : `${minutesLeft(n.endTime)} min left`}
+                    </span>
+                  </div>
+                  <ViewButton onClick={() => navigate(`/bookings/${n.id}`)}>
+                    View
+                  </ViewButton>
+                </Item>
+              ))}
+            </>
+          ) : null}
+
+          {/* Named down to the item, which is the whole point: "4 items
+              need restocking" is a job to go and investigate, "Meeting
+              Room 02 has run out of Snickers 2" is one somebody can pick
+              up on the way past. */}
+          {restockAlerts.length > 0 ? (
+            <>
+              <GroupHead>Needs restocking</GroupHead>
+              {restockAlerts.map((alert) => (
+                <Item key={alert.id}>
+                  <Dot $out={alert.isOut} />
+                  <div>
+                    <strong>{restockAlertTitle(alert)}</strong>
+                    <span title={restockAlertText(alert)}>
+                      {restockAlertText(alert)}
+                    </span>
+                  </div>
+                  <ViewButton onClick={() => navigate("/inventory")}>
+                    View
+                  </ViewButton>
+                </Item>
+              ))}
+            </>
+          ) : null}
+
+          {notifications.length === 0 && restockAlerts.length === 0 ? (
             <EmptyText>No notifications</EmptyText>
-          )}
+          ) : null}
         </Dropdown>
       )}
     </BellWrapper>

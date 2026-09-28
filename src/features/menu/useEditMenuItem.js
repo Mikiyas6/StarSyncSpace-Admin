@@ -10,6 +10,7 @@ import {
   uploadMenuItemImage,
 } from "../../services/apiMenu";
 import { menuQueryKey } from "./useMenuOverview";
+import { refreshPublicMenu } from "./refreshPublicMenu";
 
 export function useEditMenuItem() {
   const queryClient = useQueryClient();
@@ -57,6 +58,7 @@ export function useEditMenuItem() {
     onSuccess: (item) => {
       toast.success(`${item.name} updated`);
       queryClient.invalidateQueries({ queryKey: menuQueryKey });
+      refreshPublicMenu();
     },
     onError: (err) => toast.error(err.message),
   });

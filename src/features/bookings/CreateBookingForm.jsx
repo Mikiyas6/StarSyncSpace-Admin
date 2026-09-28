@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { addDays } from "date-fns";
 import styled, { css } from "styled-components";
 import { useQuery } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import {
   AlertCircle,
+  Armchair,
   ArrowRight,
+  CalendarDays,
+  CalendarRange,
   Check,
   Clock,
   Search,
@@ -37,8 +41,30 @@ import {
   setWindowEnd,
   windowMinutes,
 } from "./bookingWindow";
-import { parseLocalInput, toLocalInputValue } from "../../utils/datetime";
-import { formatCurrency } from "../../utils/helpers";
+import {
+  parseLocalInput,
+  toLocalDateValue,
+  toLocalInputValue,
+  toLocalTimeValue,
+} from "../../utils/datetime";
+import { formatCurrency, formatMenuPrice } from "../../utils/helpers";
+import {
+  DESK_STEP_MINUTES,
+  MIN_DESK_MINUTES,
+  PASS_TYPES,
+  dayPassBeatsHourly,
+  isSharedSpace,
+  passWindow,
+  passesFor,
+  priceForPass,
+  roundDeskMinutes,
+  seatCapacity,
+  seatsLeftAcrossRange,
+  seatsTakenAcrossRange,
+  validateSeatBooking,
+} from "../../utils/spaces";
+import { getRoomSeatBookings } from "../../services/apiBookings";
+import { useFxRate } from "../fx/useFxRate";
 
 /* ------------------------------------------------------------------
    Taking a booking for someone standing at the desk.
@@ -552,20 +578,410 @@ const WHEN_FORMAT = {
 
 const TIME_FORMAT = { hour: "2-digit", minute: "2-digit" };
 
-function CreateBookingForm({ onCloseModal }) {
+/* ------------------------------------------------------------------
+   Step 3, when the space is sold by the desk.
+
+   Replaces the From/to control entirely rather than sitting beside it.
+   What the desk asks for a coworking seat is a different sentence — "two
+   desks, a week from Monday" — and none of the clock machinery (quick
+   lengths, "starts now", the turnaround gap) has a meaning here.
+
+   Everything shown is computed by utils/spaces.js, the same module the
+   public site and the seat trigger use. This component does no
+   arithmetic of its own, so what the guest is quoted at the counter and
+   what the database will accept cannot drift apart.
+   ------------------------------------------------------------------ */
+/* Dates without a time, for a pass that is measured in whole days. */
+const DATE_ONLY = new Intl.DateTimeFormat(undefined, {
+  weekday: "short",
+  day: "numeric",
+  month: "short",
+});
+
+/* For an hourly desk, which is the one pass measured in clock time. */
+const TIME_ONLY = new Intl.DateTimeFormat(undefined, {
+  hour: "numeric",
+  minute: "2-digit",
+});
+
+function SeatStep({
+  room,
+  passType,
+  setPassType,
+  passUnits,
+  setPassUnits,
+  passMinutes,
+  setPassMinutes,
+  passTime,
+  setPassTime,
+  seats,
+  setSeats,
+  passStart,
+  setPassStart,
+  passRange,
+  seatsFree,
+  price,
+  dayNudge,
+  isRateIndicative,
+  /* True when "they are going in now" has taken the start over. The two
+     boxes still SHOW the moment being written, so the sheet never
+     disagrees with what it is about to save — they are just no longer
+     anybody's to type in. */
+  startPinnedToNow,
+  busy,
+  errorFor,
+  registerField,
+}) {
+  const capacity = seatCapacity(room) ?? 0;
+  const isMonthly = passType === PASS_TYPES.MONTH;
+  const isHourly = passType === PASS_TYPES.HOURLY;
+  /* Only the ways this particular space is actually sold. A space with no
+     hourly rate must not offer an hourly button the database will refuse. */
+  const passes = passesFor(room);
+
+  /* The last day the guest actually gets. The window is half-open, so it
+     ENDS at midnight on the day AFTER — printing that date would name a
+     day they have not bought and invite an argument at the counter. */
+  const lastDay = passRange
+    ? isHourly
+      ? passRange.end
+      : addDays(passRange.end, -1)
+    : null;
+
+  return (
+    <Step>
+      <StepHead>
+        <span data-num>3</span> Desks
+        <small>
+          {capacity} in {room?.name ?? "this space"}
+        </small>
+      </StepHead>
+
+      {/* Day or month. Two options, so a segmented control rather than a
+          dropdown — and the choice changes what "how many" means below
+          it, which is easier to follow when both are visible at once. */}
+      <Segmented>
+        {passes.map((value) => {
+          const meta = {
+            [PASS_TYPES.HOURLY]: { label: "By the hour", Icon: Clock },
+            [PASS_TYPES.DAY]: { label: "Day pass", Icon: CalendarDays },
+            [PASS_TYPES.MONTH]: { label: "Monthly", Icon: CalendarRange },
+          }[value];
+
+          return (
+            <Segment
+              key={value}
+              type="button"
+              $active={passType === value}
+              disabled={busy}
+              onClick={() => {
+                setPassType(value);
+                setPassUnits(1);
+                setPassMinutes(MIN_DESK_MINUTES);
+              }}
+            >
+              <meta.Icon /> {meta.label}
+            </Segment>
+          );
+        })}
+      </Segmented>
+
+      <Pair>
+        <div>
+          <FieldLabel htmlFor="passStart">Starting</FieldLabel>
+          <TextInput
+            id="passStart"
+            type="date"
+            value={passStart}
+            disabled={busy || startPinnedToNow}
+            ref={registerField("passStart")}
+            $invalid={Boolean(errorFor("passStart"))}
+            onChange={(e) => setPassStart(e.target.value)}
+          />
+          {/* No minimum on this input, unlike the public site's. A desk
+              can be sold for today — that is the whole point of a form
+              for somebody standing here — and backdating is occasionally
+              how a pass that was taken this morning gets recorded this
+              afternoon. */}
+          {startPinnedToNow ? (
+            <Hint>
+              Held at today, because they are going in now. Untick that to
+              sell a desk for a later date.
+            </Hint>
+          ) : null}
+        </div>
+
+        {isHourly ? (
+          <div>
+            <FieldLabel htmlFor="passTime">From</FieldLabel>
+            <TextInput
+              id="passTime"
+              type="time"
+              step={DESK_STEP_MINUTES * 60}
+              value={passTime}
+              disabled={busy || startPinnedToNow}
+              onChange={(e) => setPassTime(e.target.value)}
+            />
+            {startPinnedToNow ? (
+              <Hint>Following the clock — this desk starts the moment it is sold.</Hint>
+            ) : null}
+          </div>
+        ) : (
+          <div>
+            <FieldLabel htmlFor="passUnits">
+              {isMonthly ? "How many months?" : "How many days?"}
+            </FieldLabel>
+            <TextInput
+              id="passUnits"
+              type="number"
+              min={1}
+              max={isMonthly ? 12 : 60}
+              value={passUnits}
+              disabled={busy}
+              onChange={(e) => setPassUnits(e.target.value)}
+            />
+          </div>
+        )}
+      </Pair>
+
+      {isHourly ? (
+        <Pair>
+          <div>
+            <FieldLabel htmlFor="passMinutes">For how long?</FieldLabel>
+            <NativeSelect
+              id="passMinutes"
+              value={passMinutes}
+              disabled={busy}
+              onChange={(e) => setPassMinutes(Number(e.target.value))}
+            >
+              {/* One hour to twelve, in quarter-hour steps. A desk sold
+                  for longer than that is a day pass, and the nudge below
+                  says so. */}
+              {Array.from(
+                { length: (12 * 60 - MIN_DESK_MINUTES) / DESK_STEP_MINUTES + 1 },
+                (_, i) => MIN_DESK_MINUTES + i * DESK_STEP_MINUTES,
+              ).map((minutes) => (
+                <option key={minutes} value={minutes}>
+                  {formatDuration(minutes)}
+                </option>
+              ))}
+            </NativeSelect>
+          </div>
+          <div />
+        </Pair>
+      ) : null}
+
+      {/* Past the crossover, hourly costs MORE for LESS. The desk should
+          know before it quotes the guest, not after. */}
+      {dayNudge ? (
+        <Hint
+          style={{
+            color: "var(--color-yellow-700)",
+            backgroundColor: "var(--color-yellow-100)",
+            borderRadius: "var(--border-radius-sm)",
+            padding: "1rem 1.2rem",
+          }}
+        >
+          <AlertCircle
+            size={14}
+            style={{ display: "inline", verticalAlign: "-2px" }}
+          />{" "}
+          A day pass is {formatMenuPrice(dayNudge.dayRwf, "RWF")} —{" "}
+          {dayNudge.savedRwf > 0
+            ? `${formatMenuPrice(dayNudge.savedRwf, "RWF")} less than this`
+            : "the same price"}
+          , and they keep the desk all day. Offer them the day pass.
+        </Hint>
+      ) : null}
+
+      <Pair>
+        <div>
+          <FieldLabel htmlFor="seats">How many desks?</FieldLabel>
+          <TextInput
+            id="seats"
+            type="number"
+            min={1}
+            max={Math.max(1, seatsFree ?? capacity)}
+            value={seats}
+            disabled={busy}
+            ref={registerField("seats")}
+            $invalid={Boolean(errorFor("seats"))}
+            onChange={(e) => setSeats(e.target.value)}
+          />
+        </div>
+
+        <div>
+          <FieldLabel as="span">Free for those dates</FieldLabel>
+          {/* The fullest day in the range, not the emptiest and not an
+              average: a five-day pass needs its desk free on all five
+              days, so this is the number that decides the sale. */}
+          <Hint
+            style={{
+              fontSize: "1.8rem",
+              fontWeight: 600,
+              color:
+                seatsFree === 0
+                  ? "var(--color-red-700)"
+                  : seatsFree !== null && seatsFree <= Math.ceil(capacity * 0.25)
+                    ? "var(--color-yellow-700)"
+                    : "var(--color-grey-700)",
+            }}
+          >
+            <Armchair
+              size={16}
+              style={{ display: "inline", verticalAlign: "-2px" }}
+            />{" "}
+            {seatsFree === null ? "—" : `${seatsFree} of ${capacity}`}
+          </Hint>
+        </div>
+      </Pair>
+
+      {errorFor("seats") ? (
+        <FieldError>
+          <AlertCircle /> {errorFor("seats")}
+        </FieldError>
+      ) : null}
+      {errorFor("passStart") ? (
+        <FieldError>
+          <AlertCircle /> {errorFor("passStart")}
+        </FieldError>
+      ) : null}
+      {errorFor("passType") ? (
+        <FieldError>
+          <AlertCircle /> {errorFor("passType")}
+        </FieldError>
+      ) : null}
+
+      {passRange && lastDay ? (
+        <Hint>
+          <Clock
+            size={12}
+            style={{ display: "inline", verticalAlign: "-1px" }}
+          />{" "}
+          {seats} desk{Number(seats) === 1 ? "" : "s"},{" "}
+          {isHourly ? (
+            <>
+              {DATE_ONLY.format(passRange.start)}{" "}
+              {TIME_ONLY.format(passRange.start)}
+              {"–"}
+              {TIME_ONLY.format(passRange.end)}
+            </>
+          ) : (
+            <>
+              {DATE_ONLY.format(passRange.start)}
+              {" to "}
+              {DATE_ONLY.format(lastDay)}
+            </>
+          )}
+          {price ? (
+            <>
+              {" — "}
+              <strong>{formatMenuPrice(price.rwf, "RWF")}</strong>
+              {price.quotedIn === "RWF"
+                ? ` (≈ ${formatCurrency(price.usd)})`
+                : ` (${formatCurrency(price.usd)} exactly, converted at today's rate${
+                    isRateIndicative ? ", indicative" : ""
+                  })`}
+            </>
+          ) : null}
+        </Hint>
+      ) : null}
+    </Step>
+  );
+}
+
+/* ------------------------------------------------------------------
+   Opened already knowing the answer.
+
+   The availability board on the rooms page works out which spaces can
+   take a window and then opens this form on one of them. Re-typing the
+   room and both times into a second form is exactly the work that screen
+   exists to remove — and re-typing them is where a window that WAS free
+   becomes one that is not, because a digit got fumbled.
+
+   So every piece of state that has a sensible default gets an optional
+   seed instead. The shape a caller passes:
+
+     roomId     which room or space
+     start, end the window, as Dates
+     minutes    the length, for a desk sold by the hour
+     seats      how many desks
+     numGuests  how many people are coming
+     passType   how a desk is being sold. The caller decides this, because
+                only it knows whether the space HAS an hourly rate — an
+                hourly pass on a space with no hour_rate_rwf is a sale the
+                database will refuse.
+
+   Absent, everything behaves exactly as it did: a blank room, a window
+   starting at the next quarter hour, and "starts now" ticked.
+   ------------------------------------------------------------------ */
+function seededWindow(prefill) {
+  if (!prefill?.start || !prefill?.end) return initialWindow(DEFAULT_MINUTES);
+  return {
+    start: toLocalInputValue(prefill.start),
+    end: toLocalInputValue(prefill.end),
+  };
+}
+
+function CreateBookingForm({ onCloseModal, prefill = null }) {
   const { rooms, isLoading: isLoadingRooms } = useRooms();
   const { settings, isLoading: isLoadingSettings } = useSettings();
   const { createBooking, isCreating } = useCreateBooking();
 
-  const [roomId, setRoomId] = useState("");
-  const [startsNow, setStartsNow] = useState(true);
+  const [roomId, setRoomId] = useState(() =>
+    prefill?.roomId ? String(prefill.roomId) : "",
+  );
+  /* A seeded window means somebody has already decided when this booking
+     runs, so "starts now" must not be ticked — it pins the start to the
+     clock every thirty seconds and would quietly overwrite the time the
+     search was run for. */
+  const [startsNow, setStartsNow] = useState(() => !prefill?.start);
   /* Both ends of the booking in one piece of state, because they are not
      independent: moving the start drags the end along with it. */
-  const [when, setWhen] = useState(() => initialWindow(DEFAULT_MINUTES));
+  const [when, setWhen] = useState(() => seededWindow(prefill));
   const [observations, setObservations] = useState("");
-  const [numGuests, setNumGuests] = useState(1);
+  const [numGuests, setNumGuests] = useState(() =>
+    Math.max(1, Math.floor(Number(prefill?.numGuests) || 1)),
+  );
   const [isPaid, setIsPaid] = useState(true);
   const [startInUse, setStartInUse] = useState(false);
+
+  /* ---------------------------- desks ----------------------------
+     A shared space is sold on a different axis: a start DATE, a day or a
+     month, and how many desks. None of the time state above applies, so
+     it gets its own rather than the two being made to share one shape
+     that fits neither. Which set is live is decided by the room, below. */
+  const [passType, setPassType] = useState(
+    () => prefill?.passType ?? PASS_TYPES.DAY,
+  );
+  const [passUnits, setPassUnits] = useState(1);
+  const [seats, setSeats] = useState(() =>
+    Math.max(1, Math.floor(Number(prefill?.seats) || 1)),
+  );
+  const [passStart, setPassStart] = useState(() =>
+    // Local date, not toISOString(): that is UTC and lands on the wrong
+    // day either side of midnight.
+    toLocalDateValue(prefill?.start ?? new Date()),
+  );
+  /* Hourly desks only: the time of day it starts, and how long it runs.
+     A day or month pass has neither — it is anchored to midnight and
+     measured in whole days. */
+  const [passTime, setPassTime] = useState(() => {
+    if (prefill?.start) return toLocalTimeValue(prefill.start);
+    const now = new Date();
+    const next =
+      Math.ceil((now.getHours() * 60 + now.getMinutes() + 1) / DESK_STEP_MINUTES) *
+      DESK_STEP_MINUTES;
+    const clamped = Math.min(next, 23 * 60 + 45);
+    return `${String(Math.floor(clamped / 60)).padStart(2, "0")}:${String(clamped % 60).padStart(2, "0")}`;
+  });
+  /* Snapped to the desk grid, because the search window is free to be any
+     length and a desk is not: roundDeskMinutes() rounds UP, so a 20-minute
+     window seeds the hour a desk is actually sold in rather than silently
+     shortening it. */
+  const [passMinutes, setPassMinutes] = useState(() =>
+    prefill?.minutes ? roundDeskMinutes(prefill.minutes) : MIN_DESK_MINUTES,
+  );
 
   const [guestMode, setGuestMode] = useState("existing");
   const [guestSearch, setGuestSearch] = useState("");
@@ -590,6 +1006,15 @@ function CreateBookingForm({ onCloseModal }) {
   });
 
   const room = rooms?.find((entry) => String(entry.id) === String(roomId));
+
+  /* Which of the two products is being sold. Read from the room, never
+     guessed from its name.
+
+     Declared HERE, immediately after `room`, rather than beside the rest
+     of the desk state further down: the availability query below reads it
+     in its `enabled`, and a const referenced above its declaration is a
+     temporal-dead-zone crash at runtime that no build catches. */
+  const isDeskSale = isSharedSpace(room);
 
   /* getRooms() asks for no ordering, so the rows arrive in whatever order
      Postgres felt like. Eight cards in a grid survived that; a dropdown
@@ -619,18 +1044,47 @@ function CreateBookingForm({ onCloseModal }) {
     setWhen((current) => endAfterLength(current, minutes));
   }, []);
 
-  // "Starts now" has to keep meaning NOW while the form is open — a desk
-  // form can sit on screen for several minutes while the guest finds
-  // their email address, and writing a start time from when the modal
-  // opened would book the room in the past. The end moves with it, so the
-  // length the desk agreed on survives the wait.
+  /* "They are going in now" is a statement about the clock, not only
+     about the status column.
+
+     Ticking it used to set the status to "in-use" and leave whatever
+     time was picked above alone, so a booking taken at 12:39 for a 12:45
+     start was marked in use six minutes before it began — the room read
+     as occupied while it was still empty, and every seat count that
+     asked "who is in there now" believed it. Whoever is walking in is
+     walking in NOW, so now is the start time, and the two can no longer
+     disagree. */
+  const startPinnedToNow = startsNow || startInUse;
+
+  // It has to keep meaning NOW while the form is open — a desk form can
+  // sit on screen for several minutes while the guest finds their email
+  // address, and writing a start time from when the modal opened would
+  // book the room in the past. The end moves with it, so the length the
+  // desk agreed on survives the wait.
   useEffect(() => {
-    if (!startsNow) return;
+    if (!startPinnedToNow) return;
     const tick = () => setStart(toLocalInputValue(new Date()));
     tick();
     const id = setInterval(tick, 30 * 1000);
     return () => clearInterval(id);
-  }, [startsNow, setStart]);
+  }, [startPinnedToNow, setStart]);
+
+  /* The same pinning for a desk, which carries its start in two boxes
+     rather than one. A day or month pass is anchored to midnight by
+     passWindow() whatever time of day is written here, so for those this
+     only ever moves the DATE to today — which is still the right answer
+     for somebody standing at the counter. */
+  useEffect(() => {
+    if (!startInUse) return;
+    const tick = () => {
+      const now = new Date();
+      setPassStart(toLocalDateValue(now));
+      setPassTime(toLocalTimeValue(now));
+    };
+    tick();
+    const id = setInterval(tick, 30 * 1000);
+    return () => clearInterval(id);
+  }, [startInUse]);
 
   const start = useMemo(() => parseLocalInput(when.start), [when.start]);
   const end = useMemo(() => parseLocalInput(when.end), [when.end]);
@@ -643,7 +1097,9 @@ function CreateBookingForm({ onCloseModal }) {
   const { data: existingBookings = [] } = useQuery({
     queryKey: ["room-bookings", roomId, start?.toISOString(), end?.toISOString()],
     queryFn: () => getRoomBookingsAround(roomId, start, end),
-    enabled: Boolean(roomId && start && end),
+    // A shared space has no overlap rule to check — overlapping is the
+    // product. Its seat query is the one above.
+    enabled: Boolean(roomId && start && end && !isDeskSale),
   });
 
   const bounds = useMemo(() => durationBounds(settings), [settings]);
@@ -652,7 +1108,115 @@ function CreateBookingForm({ onCloseModal }) {
     [bounds],
   );
 
+  /* The live exchange rate, because a monthly desk is priced in USD and
+     what the guest pays in RWF is today's conversion of it. */
+  const { rate: rwfPerUsd, isIndicative: isRateIndicative } = useFxRate();
+
+  /* Every booking that could compete for a seat in this space.
+     Deliberately not windowed: a monthly pass bought five weeks ago is
+     still holding its desk today, so a window measured in days would miss
+     exactly the bookings that matter. */
+  const { data: seatBookings = [] } = useQuery({
+    queryKey: ["room-seat-bookings", roomId],
+    queryFn: () => getRoomSeatBookings(roomId),
+    enabled: Boolean(roomId && isDeskSale),
+  });
+
+  const isHourlyDesk = passType === PASS_TYPES.HOURLY;
+
+  /* One moment for the validator: a date for a day or month pass, a date
+     AND a time for an hourly one. Built as a local Date rather than an
+     ISO string, so "14:00" means two in the afternoon in Kigali rather
+     than in UTC. */
+  const passStartAt = useMemo(() => {
+    if (!isHourlyDesk) return passStart;
+    const [y, m, d] = passStart.split("-").map(Number);
+    const [hh, mm] = (passTime || "00:00").split(":").map(Number);
+    if (!y || !m || !d) return passStart;
+    return new Date(y, m - 1, d, hh || 0, mm || 0, 0, 0);
+  }, [isHourlyDesk, passStart, passTime]);
+
+  const passRange = useMemo(
+    () =>
+      passWindow({
+        startDate: passStartAt,
+        passType,
+        units: passUnits,
+        minutes: passMinutes,
+      }),
+    [passStartAt, passType, passUnits, passMinutes],
+  );
+
+  /* Free desks across the WHOLE range — its worst day, which is the
+     number that decides whether the sale can happen at all. */
+  const seatsFree = useMemo(() => {
+    if (!isDeskSale || !passRange) return null;
+    return seatsLeftAcrossRange(
+      room,
+      seatBookings,
+      passRange.start,
+      passRange.end,
+    );
+  }, [isDeskSale, room, seatBookings, passRange]);
+
+  const deskCheck = useMemo(() => {
+    if (!isDeskSale || !room) return {};
+    const seatsTaken = passRange
+      ? seatsTakenAcrossRange(room, seatBookings, passRange.start, passRange.end)
+      : 0;
+
+    return validateSeatBooking({
+      room,
+      seats,
+      passType,
+      startDate: passStartAt,
+      units: passUnits,
+      minutes: passMinutes,
+      seatsTaken,
+      rate: rwfPerUsd,
+      /* The desk's one liberty over the public site: a walk-in at two in
+         the afternoon wants a desk for the rest of today. */
+      allowToday: true,
+    });
+  }, [
+    isDeskSale,
+    room,
+    seatBookings,
+    passRange,
+    seats,
+    passType,
+    passStartAt,
+    passUnits,
+    passMinutes,
+    rwfPerUsd,
+  ]);
+
+  const deskPrice = useMemo(() => {
+    if (!isDeskSale) return null;
+    return priceForPass({
+      room,
+      passType,
+      seats,
+      units: passUnits,
+      minutes: passMinutes,
+      rate: rwfPerUsd,
+    });
+  }, [isDeskSale, room, passType, seats, passUnits, passMinutes, rwfPerUsd]);
+
+  /* Past the crossover an hourly desk costs more than a day pass for
+     less time. The desk should be told before it quotes the guest. */
+  const deskDayNudge = useMemo(() => {
+    if (!isDeskSale || !isHourlyDesk) return null;
+    return dayPassBeatsHourly({
+      room,
+      minutes: passMinutes,
+      seats,
+      rate: rwfPerUsd,
+    });
+  }, [isDeskSale, isHourlyDesk, room, passMinutes, seats, rwfPerUsd]);
+
   const check = useMemo(() => {
+    if (isDeskSale) return {};
     if (!room || !start || !end) return {};
     return validateAdminBooking({
       start,
@@ -661,7 +1225,7 @@ function CreateBookingForm({ onCloseModal }) {
       settings: settings ?? {},
       existingBookings,
     });
-  }, [room, start, end, settings, existingBookings]);
+  }, [isDeskSale, room, start, end, settings, existingBookings]);
 
   /* Everything wrong with the sheet right now, in the order the fields
      appear, each tied to the control it belongs to so the list can focus
@@ -684,21 +1248,39 @@ function CreateBookingForm({ onCloseModal }) {
         add("guestEmail", `"${newGuest.email.trim()}" is not a valid email address`);
     }
 
-    if (!start) add("start", "Pick the date and time this booking starts");
-    if (!end) add("end", "Pick the date and time this booking ends");
-    else if (start && end <= start)
-      add("end", "The end time has to be after the start time");
+    /* A desk sale has no start time, no end time and no length, so none
+       of the clock complaints below belong to it. Its own rules come out
+       of validateSeatBooking, which reports against the seat fields. */
+    if (isDeskSale) {
+      if (!passRange) add("passStart", "Pick the date the pass starts");
+      if (Number(seats) < 1) add("seats", "Sell at least one desk");
+      if (deskCheck.error)
+        add(
+          deskCheck.field === "startDate"
+            ? "passStart"
+            : deskCheck.field === "passType"
+              ? "passType"
+              : "seats",
+          deskCheck.error,
+        );
+    } else {
+      if (!start) add("start", "Pick the date and time this booking starts");
+      if (!end) add("end", "Pick the date and time this booking ends");
+      else if (start && end <= start)
+        add("end", "The end time has to be after the start time");
 
-    if (room && Number(numGuests) > room.maxCapacity)
-      add(
-        "people",
-        `Room ${room.name} seats ${room.maxCapacity} — reduce the number of people, or pick a bigger room`,
-      );
-    if (Number(numGuests) < 1) add("people", "A booking needs at least one person");
+      if (room && Number(numGuests) > room.maxCapacity)
+        add(
+          "people",
+          `Room ${room.name} seats ${room.maxCapacity} — reduce the number of people, or pick a bigger room`,
+        );
+      if (Number(numGuests) < 1)
+        add("people", "A booking needs at least one person");
 
-    // Whatever the shared rules reject (clash, opening hours, length),
-    // reported against the field it belongs to.
-    if (check.error) add(check.field ?? "start", check.error);
+      // Whatever the shared rules reject (clash, opening hours, length),
+      // reported against the field it belongs to.
+      if (check.error) add(check.field ?? "start", check.error);
+    }
 
     /* The validator and the checks above can reach the same conclusion —
        an end before its start is both an obvious typo and a rule breach —
@@ -720,6 +1302,10 @@ function CreateBookingForm({ onCloseModal }) {
     room,
     numGuests,
     check,
+    isDeskSale,
+    passRange,
+    seats,
+    deskCheck,
   ]);
 
   const errorFor = (field) =>
@@ -727,11 +1313,17 @@ function CreateBookingForm({ onCloseModal }) {
 
   // A clash or an out-of-hours slot is news about the world, not a
   // telling-off about an empty box, so it shows the moment it is true.
-  const availabilityError = check.error;
+  // For a desk that news is "those dates are full", which is the same
+  // kind of fact and shows the same way.
+  const availabilityError = isDeskSale ? deskCheck.error : check.error;
 
-  const price =
-    room && hasValidWindow
-      ? priceForMinutes(durationMinutes, usdPerMinuteFromRoom(room))
+  /* One `price` for the summary panel to read, whichever product this is.
+     The shapes are deliberately the same two fields (usd, rwf), so the
+     summary does not have to branch. */
+  const price = isDeskSale
+    ? deskPrice
+    : room && hasValidWindow
+      ? priceForMinutes(durationMinutes, usdPerMinuteFromRoom(room), rwfPerUsd)
       : null;
 
   function focusField(field) {
@@ -758,19 +1350,38 @@ function CreateBookingForm({ onCloseModal }) {
           ? selectedGuestId
           : (await findOrCreateGuest(newGuest)).id;
 
+      /* Two payloads, one mutation. useCreateBooking dispatches on
+         passType, so everything after the write — the toast, the cache
+         invalidation, pushing the public site's cache over — is identical
+         for a room and for a desk. */
       createBooking(
-        {
-          roomId: Number(roomId),
-          guestId,
-          room,
-          settings: settings ?? {},
-          start,
-          end,
-          observations,
-          numGuests: Number(numGuests) || 1,
-          isPaid,
-          status: startInUse ? "in-use" : "booked",
-        },
+        isDeskSale
+          ? {
+              roomId: Number(roomId),
+              guestId,
+              room,
+              startDate: passStartAt,
+              passType,
+              units: Number(passUnits) || 1,
+              minutes: passMinutes,
+              seats: Number(seats) || 1,
+              rwfPerUsd,
+              observations,
+              isPaid,
+              status: startInUse ? "in-use" : "booked",
+            }
+          : {
+              roomId: Number(roomId),
+              guestId,
+              room,
+              settings: settings ?? {},
+              start,
+              end,
+              observations,
+              numGuests: Number(numGuests) || 1,
+              isPaid,
+              status: startInUse ? "in-use" : "booked",
+            },
         { onSuccess: () => onCloseModal?.() },
       );
     } catch (err) {
@@ -793,11 +1404,11 @@ function CreateBookingForm({ onCloseModal }) {
   return (
     <Sheet onSubmit={handleSubmit} noValidate>
       <Title>
-        <h2>New booking</h2>
+        <h2>{isDeskSale ? "Sell a desk" : "New booking"}</h2>
         <p>
-          For someone at the desk — no hour of notice needed, and it can start
-          this minute. Say when it starts and when it ends; the length and the
-          price follow.
+          {isDeskSale
+            ? "For someone at the counter — a desk can start today. Say how many, from when, and for how long; the price follows."
+            : "For someone at the desk — no hour of notice needed, and it can start this minute. Say when it starts and when it ends; the length and the price follow."}
         </p>
       </Title>
 
@@ -826,11 +1437,11 @@ function CreateBookingForm({ onCloseModal }) {
           {/* ------------------------------ room ---------------------- */}
           <Step>
             <StepHead>
-              <span data-num>1</span> Room
+              <span data-num>1</span> Room or space
               <small>
                 {roomOptions.length === 1
-                  ? "1 room"
-                  : `${roomOptions.length} rooms`}
+                  ? "1 space"
+                  : `${roomOptions.length} spaces`}
               </small>
             </StepHead>
             <NativeSelect
@@ -841,11 +1452,20 @@ function CreateBookingForm({ onCloseModal }) {
               $invalid={Boolean(errorFor("room"))}
               onChange={(e) => setRoomId(e.target.value)}
             >
-              <option value="">Choose a room…</option>
+              <option value="">Choose a room or space…</option>
               {roomOptions.map((entry) => (
+                /* A shared space has no hourly rate — regularPrice is 0 by
+                   design — so quoting one here would read as "free". Each
+                   option names the price it is actually sold at. */
                 <option key={entry.id} value={entry.id}>
-                  {entry.name} — {entry.maxCapacity} seats ·{" "}
-                  {formatCurrency(entry.regularPrice)}/hr
+                  {isSharedSpace(entry)
+                    ? `${entry.name} — ${entry.maxCapacity} desks · ${formatMenuPrice(
+                        entry.day_rate_rwf ?? 0,
+                        "RWF",
+                      )}/desk/day`
+                    : `${entry.name} — ${entry.maxCapacity} seats · ${formatCurrency(
+                        entry.regularPrice,
+                      )}/hr`}
                 </option>
               ))}
             </NativeSelect>
@@ -975,114 +1595,151 @@ function CreateBookingForm({ onCloseModal }) {
         </Stack>
 
         <Stack>
-          {/* ------------------------------ when ---------------------- */}
-          <Step>
-            <StepHead>
-              <span data-num>3</span> From / to
-              <small>
-                {formatDuration(bounds.min)}–{formatDuration(bounds.max)}
-              </small>
-            </StepHead>
+          {/* ------------------------- when, or how long -------------
+              A room is sold as a start and an end; a desk is sold as a
+              start date, a number of days or months, and a number of
+              desks. They are different questions, so this is a swap
+              rather than a form that tries to ask both. */}
+          {isDeskSale ? (
+            <SeatStep
+              room={room}
+              passType={passType}
+              setPassType={setPassType}
+              passUnits={passUnits}
+              setPassUnits={setPassUnits}
+              passMinutes={passMinutes}
+              setPassMinutes={setPassMinutes}
+              passTime={passTime}
+              setPassTime={setPassTime}
+              dayNudge={deskDayNudge}
+              seats={seats}
+              setSeats={setSeats}
+              passStart={passStart}
+              setPassStart={setPassStart}
+              passRange={passRange}
+              seatsFree={seatsFree}
+              price={deskPrice}
+              isRateIndicative={isRateIndicative}
+              startPinnedToNow={startInUse}
+              busy={busy}
+              errorFor={errorFor}
+              registerField={registerField}
+            />
+          ) : (
+            <>
+            <Step>
+              <StepHead>
+                <span data-num>3</span> From / to
+                <small>
+                  {formatDuration(bounds.min)}–{formatDuration(bounds.max)}
+                </small>
+              </StepHead>
 
-            <Toggle $on={startsNow}>
-              <input
-                type="checkbox"
-                checked={startsNow}
-                disabled={busy}
-                onChange={() => setStartsNow((c) => !c)}
-              />
-              <div>
-                <strong>
-                  <Zap
-                    size={14}
-                    style={{ display: "inline", verticalAlign: "-2px" }}
+              <Toggle $on={startPinnedToNow}>
+                <input
+                  type="checkbox"
+                  checked={startPinnedToNow}
+                  /* Already pinned by "they are going in now" further
+                     down, and unticking it there is the way to unpin it —
+                     so this reads as on and cannot be fought with. */
+                  disabled={busy || startInUse}
+                  onChange={() => setStartsNow((c) => !c)}
+                />
+                <div>
+                  <strong>
+                    <Zap
+                      size={14}
+                      style={{ display: "inline", verticalAlign: "-2px" }}
+                    />{" "}
+                    Start right now
+                  </strong>
+                  <span>
+                    {startInUse
+                      ? "Held on, because they are going in now"
+                      : "Keeps up with the clock while this form is open, and carries the end time along with it"}
+                  </span>
+                </div>
+              </Toggle>
+
+              <Pair>
+                <div>
+                  <FieldLabel as="span">Starts</FieldLabel>
+                  <DateTimePicker
+                    id="booking-start"
+                    value={when.start}
+                    disabled={busy || startPinnedToNow}
+                    ref={registerField("start")}
+                    invalid={Boolean(errorFor("start"))}
+                    onChange={setStart}
+                    ariaLabel="Booking start"
+                  />
+                </div>
+                <div>
+                  <FieldLabel as="span">Ends</FieldLabel>
+                  {/* The end can never be before the start, so the days
+                      before it are struck out rather than left to be picked
+                      and then complained about. */}
+                  <DateTimePicker
+                    id="booking-end"
+                    value={when.end}
+                    min={when.start}
+                    disabled={busy}
+                    ref={registerField("end")}
+                    invalid={Boolean(errorFor("end"))}
+                    onChange={setEnd}
+                    ariaLabel="Booking end"
+                    align="right"
+                  />
+                </div>
+              </Pair>
+
+              {/* The end box carries its own date, so an overnight session is
+                  just a later date — nothing to explain and nothing to guess.
+                  The readout says the length back, which is the number the
+                  dropdown used to make the desk work out by hand. */}
+              <QuickRow>
+                <span>Or end it after</span>
+                {quickLengths.map((minutes) => (
+                  <Chip
+                    key={minutes}
+                    type="button"
+                    $active={minutes === durationMinutes}
+                    aria-pressed={minutes === durationMinutes}
+                    disabled={busy || !start}
+                    onClick={() => setLength(minutes)}
+                  >
+                    {formatDuration(minutes)}
+                  </Chip>
+                ))}
+              </QuickRow>
+
+              {errorFor("start") ? (
+                <FieldError>
+                  <AlertCircle /> {errorFor("start")}
+                </FieldError>
+              ) : null}
+              {errorFor("end") ? (
+                <FieldError>
+                  <AlertCircle /> {errorFor("end")}
+                </FieldError>
+              ) : null}
+              {!showProblems && availabilityError ? (
+                <FieldError>
+                  <AlertCircle /> {availabilityError}
+                </FieldError>
+              ) : hasValidWindow && end ? (
+                <Hint>
+                  <Clock
+                    size={12}
+                    style={{ display: "inline", verticalAlign: "-1px" }}
                   />{" "}
-                  Start right now
-                </strong>
-                <span>
-                  Keeps up with the clock while this form is open, and carries
-                  the end time along with it
-                </span>
-              </div>
-            </Toggle>
-
-            <Pair>
-              <div>
-                <FieldLabel as="span">Starts</FieldLabel>
-                <DateTimePicker
-                  id="booking-start"
-                  value={when.start}
-                  disabled={busy || startsNow}
-                  ref={registerField("start")}
-                  invalid={Boolean(errorFor("start"))}
-                  onChange={setStart}
-                  ariaLabel="Booking start"
-                />
-              </div>
-              <div>
-                <FieldLabel as="span">Ends</FieldLabel>
-                {/* The end can never be before the start, so the days
-                    before it are struck out rather than left to be picked
-                    and then complained about. */}
-                <DateTimePicker
-                  id="booking-end"
-                  value={when.end}
-                  min={when.start}
-                  disabled={busy}
-                  ref={registerField("end")}
-                  invalid={Boolean(errorFor("end"))}
-                  onChange={setEnd}
-                  ariaLabel="Booking end"
-                  align="right"
-                />
-              </div>
-            </Pair>
-
-            {/* The end box carries its own date, so an overnight session is
-                just a later date — nothing to explain and nothing to guess.
-                The readout says the length back, which is the number the
-                dropdown used to make the desk work out by hand. */}
-            <QuickRow>
-              <span>Or end it after</span>
-              {quickLengths.map((minutes) => (
-                <Chip
-                  key={minutes}
-                  type="button"
-                  $active={minutes === durationMinutes}
-                  aria-pressed={minutes === durationMinutes}
-                  disabled={busy || !start}
-                  onClick={() => setLength(minutes)}
-                >
-                  {formatDuration(minutes)}
-                </Chip>
-              ))}
-            </QuickRow>
-
-            {errorFor("start") ? (
-              <FieldError>
-                <AlertCircle /> {errorFor("start")}
-              </FieldError>
-            ) : null}
-            {errorFor("end") ? (
-              <FieldError>
-                <AlertCircle /> {errorFor("end")}
-              </FieldError>
-            ) : null}
-            {!showProblems && availabilityError ? (
-              <FieldError>
-                <AlertCircle /> {availabilityError}
-              </FieldError>
-            ) : hasValidWindow && end ? (
-              <Hint>
-                <Clock
-                  size={12}
-                  style={{ display: "inline", verticalAlign: "-1px" }}
-                />{" "}
-                Runs for {formatDuration(durationMinutes)}, until{" "}
-                {end.toLocaleTimeString(undefined, TIME_FORMAT)}
-              </Hint>
-            ) : null}
-          </Step>
+                  Runs for {formatDuration(durationMinutes)}, until{" "}
+                  {end.toLocaleTimeString(undefined, TIME_FORMAT)}
+                </Hint>
+              ) : null}
+            </Step>
+            </>
+          )}
 
           {/* --------------------------- at the desk ------------------ */}
           <Step>
@@ -1090,33 +1747,41 @@ function CreateBookingForm({ onCloseModal }) {
               <span data-num>4</span> At the desk
             </StepHead>
 
-            <Pair>
-              <div>
-                <TextInput
-                  type="number"
-                  min={1}
-                  max={room?.maxCapacity ?? 50}
-                  value={numGuests}
-                  disabled={busy}
-                  ref={registerField("people")}
-                  $invalid={Boolean(errorFor("people"))}
-                  onChange={(e) => setNumGuests(e.target.value)}
-                  aria-label="Number of people"
-                />
-                <Hint style={{ marginTop: "0.4rem" }}>
-                  <Users
-                    size={12}
-                    style={{ display: "inline", verticalAlign: "-1px" }}
-                  />{" "}
-                  People{room ? ` · room seats ${room.maxCapacity}` : ""}
-                </Hint>
-              </div>
-            </Pair>
-            {errorFor("people") ? (
-              <FieldError>
-                <AlertCircle /> {errorFor("people")}
-              </FieldError>
-            ) : null}
+            {/* Not asked for a desk sale: the number of desks in step 3
+                IS the number of people, and two controls for one number
+                is how they come to disagree. createSeatBookingApi writes
+                numGuests from the seat count. */}
+            {isDeskSale ? null : (
+              <>
+                <Pair>
+                  <div>
+                    <TextInput
+                      type="number"
+                      min={1}
+                      max={room?.maxCapacity ?? 50}
+                      value={numGuests}
+                      disabled={busy}
+                      ref={registerField("people")}
+                      $invalid={Boolean(errorFor("people"))}
+                      onChange={(e) => setNumGuests(e.target.value)}
+                      aria-label="Number of people"
+                    />
+                    <Hint style={{ marginTop: "0.4rem" }}>
+                      <Users
+                        size={12}
+                        style={{ display: "inline", verticalAlign: "-1px" }}
+                      />{" "}
+                      People{room ? ` · room seats ${room.maxCapacity}` : ""}
+                    </Hint>
+                  </div>
+                </Pair>
+                {errorFor("people") ? (
+                  <FieldError>
+                    <AlertCircle /> {errorFor("people")}
+                  </FieldError>
+                ) : null}
+              </>
+            )}
 
             <NoteArea
               value={observations}
@@ -1149,7 +1814,9 @@ function CreateBookingForm({ onCloseModal }) {
               <div>
                 <strong>They are going in now</strong>
                 <span>
-                  Otherwise it becomes “in use” on its own at the start time
+                  Starts it at this moment, whatever time is picked above, and
+                  marks it in use. Leave it off and it becomes “in use” on its
+                  own at the start time.
                 </span>
               </div>
             </Toggle>
@@ -1160,7 +1827,7 @@ function CreateBookingForm({ onCloseModal }) {
       {/* ------------------------------ summary ---------------------- */}
       <Summary as="dl">
         <Line>
-          <dt>Room</dt>
+          <dt>{isDeskSale ? "Space" : "Room"}</dt>
           <dd>{room ? room.name : <em>Not chosen yet</em>}</dd>
         </Line>
         <Line>
@@ -1171,36 +1838,138 @@ function CreateBookingForm({ onCloseModal }) {
               : (selectedGuest?.fullName ?? <em>Not chosen yet</em>)}
           </dd>
         </Line>
-        <Line>
-          <dt>
-            <Clock
-              size={13}
-              style={{ display: "inline", verticalAlign: "-2px" }}
-            />{" "}
-            When
-          </dt>
-          <dd>
-            {start && end && hasValidWindow ? (
-              <>
-                {start.toLocaleString(undefined, WHEN_FORMAT)}
-                <ArrowRight
+        {/* A desk pass is measured in whole days, so it reads as two
+            DATES rather than two clock times — and the second one is the
+            last day the guest gets, not the half-open end, which would
+            name a day they have not bought. */}
+        {isDeskSale ? (
+          <>
+            <Line>
+              <dt>
+                <Armchair
                   size={13}
-                  style={{ display: "inline", verticalAlign: "-2px", margin: "0 0.4rem" }}
-                />
-                {end.toLocaleString(undefined, WHEN_FORMAT)}
-              </>
-            ) : (
-              <em>Not set yet</em>
-            )}
-          </dd>
-        </Line>
+                  style={{ display: "inline", verticalAlign: "-2px" }}
+                />{" "}
+                Desks
+              </dt>
+              <dd>
+                {seats}
+                {seatsFree !== null ? (
+                  <small>{seatsFree} free for those dates</small>
+                ) : null}
+              </dd>
+            </Line>
+            <Line>
+              <dt>
+                <CalendarDays
+                  size={13}
+                  style={{ display: "inline", verticalAlign: "-2px" }}
+                />{" "}
+                {isHourlyDesk ? "When" : "Dates"}
+              </dt>
+              <dd>
+                {passRange ? (
+                  isHourlyDesk ? (
+                    /* An hourly window ends at a real moment, so it is
+                       printed as it is. A day or month window is
+                       half-open and ends at midnight AFTER the last day
+                       the guest gets, so that one shows the last day
+                       included instead. */
+                    <>
+                      {DATE_ONLY.format(passRange.start)}{" "}
+                      {TIME_ONLY.format(passRange.start)}
+                      <ArrowRight
+                        size={13}
+                        style={{
+                          display: "inline",
+                          verticalAlign: "-2px",
+                          margin: "0 0.4rem",
+                        }}
+                      />
+                      {TIME_ONLY.format(passRange.end)}
+                    </>
+                  ) : (
+                    <>
+                      {DATE_ONLY.format(passRange.start)}
+                      <ArrowRight
+                        size={13}
+                        style={{
+                          display: "inline",
+                          verticalAlign: "-2px",
+                          margin: "0 0.4rem",
+                        }}
+                      />
+                      {DATE_ONLY.format(addDays(passRange.end, -1))}
+                    </>
+                  )
+                ) : (
+                  <em>Not set yet</em>
+                )}
+              </dd>
+            </Line>
+          </>
+        ) : (
+          <Line>
+            <dt>
+              <Clock
+                size={13}
+                style={{ display: "inline", verticalAlign: "-2px" }}
+              />{" "}
+              When
+            </dt>
+            <dd>
+              {start && end && hasValidWindow ? (
+                <>
+                  {start.toLocaleString(undefined, WHEN_FORMAT)}
+                  <ArrowRight
+                    size={13}
+                    style={{ display: "inline", verticalAlign: "-2px", margin: "0 0.4rem" }}
+                  />
+                  {end.toLocaleString(undefined, WHEN_FORMAT)}
+                </>
+              ) : (
+                <em>Not set yet</em>
+              )}
+            </dd>
+          </Line>
+        )}
         <Total>
           <dt>
-            {hasValidWindow ? formatDuration(durationMinutes) : "Length not set"}
+            {isDeskSale
+              ? passRange
+                ? isHourlyDesk
+                  ? `${formatDuration(passMinutes)} × ${seats} desk${
+                      Number(seats) === 1 ? "" : "s"
+                    }`
+                  : `${passUnits} ${
+                      passType === PASS_TYPES.MONTH ? "month" : "day"
+                    }${Number(passUnits) === 1 ? "" : "s"} × ${seats} desk${
+                      Number(seats) === 1 ? "" : "s"
+                    }`
+                : "Pass not set"
+              : hasValidWindow
+                ? formatDuration(durationMinutes)
+                : "Length not set"}
           </dt>
           <dd>
-            {price ? formatCurrency(price.usd) : "—"}
-            {price ? <small>{price.rwf.toLocaleString()} RWF</small> : null}
+            {/* RWF leads for a desk, because that is the price on the
+                wall and what the guest hands over; USD leads for a room,
+                which is how its rate is set. */}
+            {price ? (
+              isDeskSale ? (
+                <>
+                  {formatMenuPrice(price.rwf, "RWF")}
+                  <small>{formatCurrency(price.usd)}</small>
+                </>
+              ) : (
+                <>
+                  {formatCurrency(price.usd)}
+                  <small>{price.rwf.toLocaleString()} RWF</small>
+                </>
+              )
+            ) : (
+              "—"
+            )}
           </dd>
         </Total>
       </Summary>

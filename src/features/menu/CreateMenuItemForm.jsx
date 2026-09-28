@@ -58,6 +58,16 @@ const Select = styled.select`
   font-size: 1.4rem;
 `;
 
+/* A sentence under a control that explains a distinction the label has no
+   room for. Used by the stock flag, where "kept as stock" is meaningless
+   until you know it is what separates a bottle from a plate of food. */
+const Hint = styled.p`
+  font-size: 1.3rem;
+  line-height: 1.5;
+  color: var(--color-grey-500);
+  margin-top: 0.6rem;
+`;
+
 const CheckboxRow = styled.div`
   display: flex;
   align-items: center;
@@ -104,12 +114,14 @@ function CreateMenuItemForm({ itemToEdit = {}, onCloseModal }) {
             dietary_tags: itemToEdit.dietary_tags ?? [],
             is_available: itemToEdit.is_available,
             is_featured: itemToEdit.is_featured,
+            is_stocked: itemToEdit.is_stocked ?? false,
             sort_order: itemToEdit.sort_order ?? 0,
           }
         : {
             currency: "RWF",
             is_available: true,
             is_featured: false,
+            is_stocked: false,
             sort_order: 0,
             section_id: "",
           },
@@ -393,6 +405,31 @@ function CreateMenuItemForm({ itemToEdit = {}, onCloseModal }) {
                 Feature in the Chef&apos;s Recommendations carousel
               </label>
             </CheckboxRow>
+          </FormRow>
+
+          <FormRow label="Kept as stock">
+            <CheckboxRow>
+              <input
+                id="is_stocked"
+                type="checkbox"
+                disabled={isWorking}
+                {...register("is_stocked")}
+              />
+              <label htmlFor="is_stocked">
+                Counted in the rooms&apos; fridges and shelves
+              </label>
+            </CheckboxRow>
+            {/* This is what separates a bottle of water, which sits in a
+                fridge and has a number, from grilled tilapia, which is
+                cooked to order and does not. Only items ticked here can be
+                added to a room on the Inventory page, sold from it, or
+                restocked. */}
+            <Hint>
+              Tick this for anything physically held in a room — drinks,
+              snacks, anything on a shelf. It can then be counted per room on
+              the Inventory page, and selling it there adds to the day&apos;s
+              takings. Leave it off for food made to order.
+            </Hint>
           </FormRow>
 
           <FormRow label="Display order" error={errors?.sort_order?.message}>

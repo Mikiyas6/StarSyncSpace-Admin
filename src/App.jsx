@@ -7,6 +7,7 @@ import Rooms from "./pages/Rooms";
 import Users from "./pages/Users";
 import Settings from "./pages/Settings";
 import Menu from "./pages/Menu";
+import Inventory from "./pages/Inventory";
 import Reviews from "./pages/Reviews";
 import Account from "./pages/Account";
 import Login from "./pages/Login";
@@ -17,6 +18,7 @@ import { Toaster } from "react-hot-toast";
 import Booking from "./pages/Booking";
 import Checkin from "./pages/Checkin";
 import ProtectedRoute from "./ui/ProtectedRoute";
+import RequireAdmin from "./ui/RequireAdmin";
 import ThemeProvider from "./context/ThemeProvider";
 
 /*
@@ -132,10 +134,47 @@ function App() {
               <Route path="bookings" element={<Bookings />} />
               <Route path="bookings/:bookingId" element={<Booking />} />
               <Route path="checkin/:bookingId" element={<Checkin />} />
-              <Route path="rooms" element={<Rooms />} />
-              <Route path="users" element={<Users />} />
-              <Route path="settings" element={<Settings />} />
-              <Route path="menu" element={<Menu />} />
+              {/* Staff see Inventory: selling and removing snacks is
+                  their job. The admin-only controls are gated inside it. */}
+              <Route path="inventory" element={<Inventory />} />
+
+              {/* Admin-only. RequireAdmin is a courtesy, not the lock —
+                  row-level security in the database refuses these writes
+                  whether or not anything rendered. It exists so a staff
+                  member who follows an old bookmark gets a sentence
+                  instead of a page of controls that all fail. */}
+              <Route
+                path="rooms"
+                element={
+                  <RequireAdmin what="Rooms">
+                    <Rooms />
+                  </RequireAdmin>
+                }
+              />
+              <Route
+                path="users"
+                element={
+                  <RequireAdmin what="The team page">
+                    <Users />
+                  </RequireAdmin>
+                }
+              />
+              <Route
+                path="settings"
+                element={
+                  <RequireAdmin what="Settings">
+                    <Settings />
+                  </RequireAdmin>
+                }
+              />
+              <Route
+                path="menu"
+                element={
+                  <RequireAdmin what="The menu">
+                    <Menu />
+                  </RequireAdmin>
+                }
+              />
               <Route path="reviews" element={<Reviews />} />
               <Route path="account" element={<Account />} />
             </Route>
