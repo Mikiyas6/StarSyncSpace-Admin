@@ -20,7 +20,7 @@ cp .env.local.example .env.local   # or reuse the existing .env.local
 npm run dev
 ```
 
-The client reads `SUPABASE_URL` and `SUPABASE_KEY` from `.env.local` (see `src/services/supabase.js`). `npm run build` + `npm run deploy` publish to GitHub Pages via `gh-pages`.
+The client reads `SUPABASE_URL` and `SUPABASE_KEY` from `.env.local` (see `src/services/supabase.js`). `npm run build` + `npm run deploy` publish to GitHub Pages via `gh-pages`
 
 ## What this app does
 
