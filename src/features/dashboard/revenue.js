@@ -52,7 +52,7 @@ import {
   startOfYear,
 } from "date-fns";
 
-import { rwfForUsd } from "../../utils/fx";
+import { FALLBACK_RWF_PER_USD, rwfForUsd } from "../../utils/fx";
 import { isSaleReason } from "../../utils/stock";
 
 export const STREAMS = {
@@ -118,20 +118,73 @@ export function isRevenueBooking(booking, { countForfeited = true } = {}) {
   return true;
 }
 
+/* How far a frozen RWF amount may sit from what the booking's own USD
+   total converts to at today's rate before it stops being believable.
+
+   Generous on purpose, because a healthy freeze SHOULD differ: it was
+   taken at the rate of its own day, and RWF/USD has moved by double
+   digits over the life of this business. Re-deriving those rows would
+   be the very thing this module refuses to do.
+
+   What it is tight enough to catch is a freeze that does not describe
+   this PRICE at all — a two-hour booking later shortened to eighty
+   minutes, whose USD total was recomputed and whose RWF total was not.
+   That row implies 2,206 RWF to the dollar. No day in Rwanda's history
+   had that rate; the number is simply the old price wearing the new
+   one's label, and preferring it reports half again as much money as
+   the room took. */
+export const FROZEN_RWF_TOLERANCE = 0.35;
+
+/* What exchange rate a frozen figure implies, given the booking's own
+   USD price. null when either half is missing, so there is nothing to
+   check against. */
+export function impliedRwfPerUsd(booking) {
+  const charged = Number(booking?.amount_rwf);
+  const usd = Number(booking?.totalPrice);
+  if (!Number.isFinite(charged) || charged <= 0) return null;
+  if (!Number.isFinite(usd) || usd <= 0) return null;
+  return charged / usd;
+}
+
 /* What a booking brought in, in RWF.
 
-   `amount_rwf` first, always: it is what was charged. Only a row that
-   predates the column falls back to converting its USD total, and the
-   caller is told (`estimated`) so a total is never silently part-guess. */
-export function bookingRevenueRwf(booking, rate) {
+   `amount_rwf` is still preferred — it is what was charged, and last
+   month's takings must not move when the exchange rate does. But it is
+   preferred only while it and `totalPrice` can both be true of the same
+   booking. When they cannot, the room's USD price is the figure of
+   record (it is the one the admin types and the one every booking
+   screen shows) and it is converted, at the live rate, to get an RWF
+   total that at least describes the right sale.
+
+   `estimated` says the returned figure came out of a conversion rather
+   than off the row, so a total is never silently part-guess. `restated`
+   distinguishes the two reasons: a row that predates `amount_rwf`
+   simply has nothing frozen, while a restated one had a frozen figure
+   that was thrown away — a data fault worth naming rather than
+   absorbing. */
+export function bookingRevenueRwf(booking, rate = FALLBACK_RWF_PER_USD) {
   const charged = Number(booking?.amount_rwf);
-  if (Number.isFinite(charged) && charged > 0)
-    return { rwf: charged, estimated: false };
+  const hasCharged = Number.isFinite(charged) && charged > 0;
 
   const usd = Number(booking?.totalPrice);
-  if (!Number.isFinite(usd) || usd <= 0) return { rwf: 0, estimated: false };
+  const hasUsd = Number.isFinite(usd) && usd > 0;
 
-  return { rwf: rwfForUsd(usd, rate), estimated: true };
+  // Nothing to cross-check against: take the freeze at its word, which
+  // is what every row did before this check existed.
+  if (hasCharged && !hasUsd) return { rwf: charged, estimated: false };
+  if (!hasUsd) return { rwf: 0, estimated: false };
+
+  const converted = rwfForUsd(usd, rate);
+
+  // Predates the column. Converting is the only thing available.
+  if (!hasCharged) return { rwf: converted, estimated: true, restated: false };
+
+  const reference = Number(rate) || FALLBACK_RWF_PER_USD;
+  const drift = Math.abs(charged / usd - reference) / reference;
+  if (drift <= FROZEN_RWF_TOLERANCE)
+    return { rwf: charged, estimated: false, restated: false };
+
+  return { rwf: converted, estimated: true, restated: true, frozenRwf: charged };
 }
 
 /* Which stream a booking belongs to.
@@ -242,12 +295,18 @@ export function revenueByStream({
 } = {}) {
   const totals = emptyTotals();
   let estimatedRwf = 0;
+  let restatedRwf = 0;
+  let restatedCount = 0;
 
   for (const booking of bookings) {
     if (!isRevenueBooking(booking, { countForfeited })) continue;
-    const { rwf, estimated } = bookingRevenueRwf(booking, rate);
+    const { rwf, estimated, restated } = bookingRevenueRwf(booking, rate);
     totals[streamForBooking(booking)] += rwf;
     if (estimated) estimatedRwf += rwf;
+    if (restated) {
+      restatedRwf += rwf;
+      restatedCount += 1;
+    }
   }
 
   /* Snacks are the one stream with a cost of goods, so they are the one
@@ -278,6 +337,15 @@ export function revenueByStream({
        rate rather than reading what was charged. Surfaced so a report can
        caveat itself instead of presenting an estimate as a fact. */
     estimatedRwf,
+
+    /* The part of that which was NOT simply a missing column: bookings
+       whose frozen RWF total contradicted their own USD price and was
+       therefore thrown away. Counted separately because it is a fault in
+       the data rather than a gap in it — one that wants fixing at the
+       row, not caveating forever. */
+    restatedRwf,
+    restatedCount,
+
     /* Rooms and snacks as a share, which is the comparison anybody
        actually wants out of a fridge: is it worth the trouble? */
     rooms: totals[STREAMS.MEETING_ROOMS] + totals[STREAMS.SHARED_SPACES],

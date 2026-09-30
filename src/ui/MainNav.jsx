@@ -112,7 +112,7 @@ function MainNav() {
             {lowCount > 0 ? <PendingBadge>{lowCount}</PendingBadge> : null}
           </StyledNavLink>
         </li>
-        {can.manageRooms ? (
+        {can.viewRooms ? (
           <li>
             <StyledNavLink to="/rooms">
               <Building2 />
@@ -136,7 +136,7 @@ function MainNav() {
             </StyledNavLink>
           </li>
         ) : null}
-        {can.manageMenu ? (
+        {can.viewMenu ? (
           <li>
             <StyledNavLink to="/menu">
               <UtensilsCrossed />

@@ -11,7 +11,7 @@ export const rooms = [
   {
     name: "001",
     maxCapacity: 2,
-    regularPrice: 20,
+    hour_rate_rwf: 30000,
     discount: 0,
     image: imageUrl + "cabin-001.jpg",
     description:
@@ -23,7 +23,7 @@ export const rooms = [
   {
     name: "002",
     maxCapacity: 2,
-    regularPrice: 20,
+    hour_rate_rwf: 30000,
     discount: 3,
     image: imageUrl + "cabin-002.jpg",
     description:
@@ -35,7 +35,7 @@ export const rooms = [
   {
     name: "003",
     maxCapacity: 4,
-    regularPrice: 35,
+    hour_rate_rwf: 52500,
     discount: 0,
     image: imageUrl + "cabin-003.jpg",
     description:
@@ -47,7 +47,7 @@ export const rooms = [
   {
     name: "004",
     maxCapacity: 4,
-    regularPrice: 35,
+    hour_rate_rwf: 52500,
     discount: 5,
     image: imageUrl + "cabin-004.jpg",
     description:
@@ -59,7 +59,7 @@ export const rooms = [
   {
     name: "005",
     maxCapacity: 6,
-    regularPrice: 50,
+    hour_rate_rwf: 75000,
     discount: 0,
     image: imageUrl + "cabin-005.jpg",
     description:
@@ -71,7 +71,7 @@ export const rooms = [
   {
     name: "006",
     maxCapacity: 6,
-    regularPrice: 50,
+    hour_rate_rwf: 75000,
     discount: 8,
     image: imageUrl + "cabin-006.jpg",
     description:
@@ -83,7 +83,7 @@ export const rooms = [
   {
     name: "007",
     maxCapacity: 8,
-    regularPrice: 70,
+    hour_rate_rwf: 105000,
     discount: 0,
     image: imageUrl + "cabin-007.jpg",
     description:
@@ -95,7 +95,7 @@ export const rooms = [
   {
     name: "008",
     maxCapacity: 10,
-    regularPrice: 90,
+    hour_rate_rwf: 135000,
     discount: 10,
     image: imageUrl + "cabin-008.jpg",
     description:

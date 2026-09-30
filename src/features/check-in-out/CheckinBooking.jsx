@@ -12,7 +12,7 @@ import Checkbox from "../../ui/Checkbox";
 import { useMoveBack } from "../../hooks/useMoveBack";
 import { useEffect } from "react";
 import { useCheckin } from "./useCheckin";
-import { formatCurrency } from "../../utils/helpers";
+import { formatRwfAmount } from "../../utils/helpers";
 import Empty from "../../ui/Empty";
 
 const Box = styled.div`
@@ -33,7 +33,16 @@ function CheckinBooking() {
   if (isLoading) return <Spinner />;
   if (!booking) return <Empty resourceName="booking" />;
 
-  const { id: bookingId, guests, totalPrice, status } = booking;
+  const {
+    id: bookingId,
+    guests,
+    /* Francs: the desk takes francs, and this checkbox is the desk
+       confirming what it took. It used to read the retired USD
+       "totalPrice", so somebody counting 38,500 francs into a drawer was
+       asked to confirm "$26.07". */
+    amount_rwf: amountRwf,
+    status,
+  } = booking;
 
   /* Statuses now advance on their own at the start time (see
      useReconcileStatuses), so by the time the desk opens this page a
@@ -65,7 +74,7 @@ function CheckinBooking() {
           disabled={confirmPaid || isCheckingIn}
         >
           I confirm that {guests.fullName} has paid the total amount of{" "}
-          {formatCurrency(totalPrice)}.
+          {formatRwfAmount(amountRwf)}.
         </Checkbox>
       </Box>
       <ButtonGroup>

@@ -12,12 +12,24 @@ import {
 } from "./stock";
 
 describe("who may record what", () => {
-  /* The rule from the brief: staff reduce stock, admins put it in. */
-  it("lets staff take stock out but not put it in", () => {
-    expect(STAFF_REASONS).toContain("sale");
-    expect(STAFF_REASONS).toContain("removal");
-    expect(STAFF_REASONS).toContain("waste");
+  /* The rule as of supabase/20: staff sell, and move stock between
+     rooms. Everything else is an admin's.
+
+     It used to be "staff reduce stock, admins put it in", which gave the
+     desk removal and waste as well — the two reasons that make stock
+     vanish with nothing anywhere to reconcile them against. */
+  it("lets staff sell and transfer, and nothing else", () => {
+    expect(STAFF_REASONS).toEqual(["sale", "transfer_out"]);
+  });
+
+  /* Spelled out separately from the list above, because this is the
+     rule rather than the current contents of an array: if somebody
+     widens STAFF_REASONS, this is the test that should stop them. */
+  it("does not let staff take stock out without a sale", () => {
+    expect(STAFF_REASONS).not.toContain("removal");
+    expect(STAFF_REASONS).not.toContain("waste");
     expect(STAFF_REASONS).not.toContain("restock");
+    expect(STAFF_REASONS).not.toContain("transfer_in");
     expect(STAFF_REASONS).not.toContain("correction");
   });
 

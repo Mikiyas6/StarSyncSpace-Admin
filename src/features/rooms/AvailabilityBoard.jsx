@@ -15,7 +15,7 @@ import Spinner from "../../ui/Spinner";
 import Tag from "../../ui/Tag";
 import CreateBookingForm from "../bookings/CreateBookingForm";
 import { useSettings } from "../settings/useSettings";
-import { formatCurrency, formatMenuPrice } from "../../utils/helpers";
+import { formatMenuPrice } from "../../utils/helpers";
 import { PASS_TYPES, isSharedSpace, offersHourly } from "../../utils/spaces";
 import { useRooms } from "./useRooms";
 import {
@@ -338,7 +338,7 @@ function AvailabilityBoard({
                   <span>
                     {shared
                       ? `${formatMenuPrice(room.day_rate_rwf ?? 0, "RWF")}/desk/day`
-                      : `${formatCurrency(room.regularPrice)}/hr`}
+                      : `${formatMenuPrice(room.hour_rate_rwf ?? 0, "RWF")}/hr`}
                   </span>
                   <Users />
                   <span>{result.capacity}</span>

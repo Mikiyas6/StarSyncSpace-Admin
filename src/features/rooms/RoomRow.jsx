@@ -1,5 +1,8 @@
 import styled, { css } from "styled-components";
-import { formatCurrency, formatRwfPerMinute } from "../../utils/helpers";
+import { formatRwfAmount } from "../../utils/helpers";
+import { isSharedSpace } from "../../utils/spaces";
+import { rwfPerMinuteFromRoom } from "../../utils/booking";
+import { useFxRate } from "../fx/useFxRate";
 import CreateRoomForm from "./CreateRoomForm";
 import { useDeleteRoom } from "./useDeleteRoom";
 import { Copy, ImageOff, Pencil, Trash2, Users } from "lucide-react";
@@ -10,6 +13,7 @@ import Table from "../../ui/Table";
 import Tag from "../../ui/Tag";
 import Menus from "../../ui/Menus";
 import Button from "../../ui/Button";
+import { useAdminRole } from "../authentication/useAdminRole";
 
 /* ------------------------------------------------------------------
    One room, as a row.
@@ -124,13 +128,33 @@ function RoomRow({ room }) {
     image,
     description,
     id: roomId,
+    room_type,
+    hour_rate_rwf,
+    day_rate_rwf,
+    month_rate_rwf,
   } = room;
+
+  /* Only consulted for a room the RWF migration has not reached, whose
+     price is still only on the retired USD column. */
+  const { rate: rwfPerUsd } = useFxRate();
+  const shared = isSharedSpace(room);
+  const perMinuteRwf = rwfPerMinuteFromRoom(room, rwfPerUsd);
+  const perHourRwf = Math.round(perMinuteRwf * 60);
+  const { can } = useAdminRole();
   const { deleteRoom, isDeleting } = useDeleteRoom();
   const { isCreating, createRoom } = useCreateRoom();
   function handleDuplicate() {
     createRoom({
       name: `Copy of ${name}`,
       maxCapacity,
+      /* Every rate, and the TYPE. A copy that dropped room_type turned a
+         shared space into a meeting room, and a copy that dropped the
+         franc rates produced a room priced at nothing — both of which
+         only showed up once somebody tried to sell it. */
+      room_type,
+      hour_rate_rwf,
+      day_rate_rwf,
+      month_rate_rwf,
       regularPrice,
       discount,
       image,
@@ -159,52 +183,74 @@ function RoomRow({ room }) {
         </span>
       </Capacity>
 
+      {/* A desk and a room are not sold on the same axis, so they do not
+          get the same price line. A shared space leads with the day pass
+          — its entry price — because its hourly rate buys one seat and
+          reads as absurdly cheap next to a whole room's. The old row
+          showed "$0.00/hr" for every desk, which is what `regularPrice`
+          actually held for them. */}
       <Stacked>
-        <Price>{formatCurrency(regularPrice)}/hr</Price>
-        <PerMinute>
-          {formatRwfPerMinute(regularPrice / 60)}/min
-        </PerMinute>
+        {shared ? (
+          <>
+            <Price>{formatRwfAmount(day_rate_rwf ?? 0)}/desk/day</Price>
+            <PerMinute>
+              {hour_rate_rwf
+                ? `${formatRwfAmount(hour_rate_rwf)}/desk/hr`
+                : "not sold by the hour"}
+            </PerMinute>
+          </>
+        ) : (
+          <>
+            <Price>{formatRwfAmount(perHourRwf)}/hr</Price>
+            <PerMinute>{formatRwfAmount(perMinuteRwf)}/min</PerMinute>
+          </>
+        )}
       </Stacked>
 
       {discount ? (
-        <Tag type="green">&minus;{formatCurrency(discount)}</Tag>
+        <Tag type="green">&minus;{formatRwfAmount(discount)}</Tag>
       ) : (
         <Dash>&mdash;</Dash>
       )}
       <div>
-        <Modal>
-          <Menus.Menu>
-            <Menus.Toggle id={roomId} />
-            <Menus.List id={roomId}>
-              <Menus.Button icon={<Copy />} onClick={handleDuplicate}>
-                Duplicate
-              </Menus.Button>
-
-              <Modal.Open opens="edit-room">
-                <Menus.Button icon={<Pencil />} onClick={() => {}}>
-                  Edit
+        {/* Duplicate, Edit and Delete are the whole menu, and all three
+            are admin work — so for staff the cell is simply empty
+            rather than a toggle that opens onto nothing. */}
+        {can.manageRooms ? (
+          <Modal>
+            <Menus.Menu>
+              <Menus.Toggle id={roomId} />
+              <Menus.List id={roomId}>
+                <Menus.Button icon={<Copy />} onClick={handleDuplicate}>
+                  Duplicate
                 </Menus.Button>
-              </Modal.Open>
 
-              <Modal.Open opens="delete-room">
-                <Menus.Button icon={<Trash2 />}>Delete</Menus.Button>
-              </Modal.Open>
-            </Menus.List>
-          </Menus.Menu>
+                <Modal.Open opens="edit-room">
+                  <Menus.Button icon={<Pencil />} onClick={() => {}}>
+                    Edit
+                  </Menus.Button>
+                </Modal.Open>
 
-          <Modal.Window name="edit-room">
-            <CreateRoomForm roomToEdit={room} />
-          </Modal.Window>
+                <Modal.Open opens="delete-room">
+                  <Menus.Button icon={<Trash2 />}>Delete</Menus.Button>
+                </Modal.Open>
+              </Menus.List>
+            </Menus.Menu>
 
-          <Modal.Window name="delete-room">
-            <ConfirmDelete
-              resourceName="rooms"
-              disabled={isDeleting}
-              room={room}
-              onConfirm={() => deleteRoom(roomId)}
-            />
-          </Modal.Window>
-        </Modal>
+            <Modal.Window name="edit-room">
+              <CreateRoomForm roomToEdit={room} />
+            </Modal.Window>
+
+            <Modal.Window name="delete-room">
+              <ConfirmDelete
+                resourceName="rooms"
+                disabled={isDeleting}
+                room={room}
+                onConfirm={() => deleteRoom(roomId)}
+              />
+            </Modal.Window>
+          </Modal>
+        ) : null}
       </div>
     </Table.Row>
   );

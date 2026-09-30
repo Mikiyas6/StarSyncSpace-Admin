@@ -20,8 +20,12 @@ function RoomTableOperations() {
         options={[
           { value: "name-asc", label: "Sort by name (A-Z)" },
           { value: "name-desc", label: "Sort by name (Z-A)" },
-          { value: "regularPrice-asc", label: "Sort by price (low first) " },
-          { value: "regularPrice-desc", label: "Sort by price (high first)" },
+          /* hour_rate_rwf, not the retired "regularPrice" — which was
+             0 on every shared space, so sorting by price used to put
+             the desks together at one end regardless of what they
+             cost. */
+          { value: "hour_rate_rwf-asc", label: "Sort by price (low first) " },
+          { value: "hour_rate_rwf-desc", label: "Sort by price (high first)" },
           { value: "maxCapacity-asc", label: "Sort by capacity (low first)" },
           { value: "maxCapacity-desc", label: "Sort by capacity (high first)" },
         ]}

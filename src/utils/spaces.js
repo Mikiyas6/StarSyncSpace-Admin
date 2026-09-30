@@ -20,10 +20,10 @@
    A meeting room and a shared space are sold on different axes:
 
      meeting room   the whole room, for a stretch of minutes. Booking it
-                    makes it unavailable. Priced per hour in USD.
+                    makes it unavailable. Priced per hour in RWF.
      shared space   ONE SEAT, for whole days or a month. Booking it makes
                     the room one seat emptier. Priced per seat per day in
-                    RWF, or per seat per month in USD.
+                    RWF, by the hour or by the month — every rate in RWF.
 
    So this is not a variation on booking.js — it is the other half.
    Nothing here deals in minutes, slots, or the turnaround gap, because
@@ -44,7 +44,11 @@ import { rwfForUsd, usdForRwf } from "./fx";
    list drives NON_BLOCKING_STATUSES in booking.js and
    booking_holds_space() in the database, so a new status has to be
    considered once rather than in three arithmetic paths. */
-import { isBlockingBooking } from "./booking";
+import {
+  PRICE_PER_MINUTE_RWF,
+  isBlockingBooking,
+  rwfPerMinuteFromRoom,
+} from "./booking";
 
 export const ROOM_TYPES = {
   MEETING_ROOM: "meeting_room",
@@ -63,6 +67,35 @@ export function isMeetingRoom(room) {
   // keeps every room that existed before this column did working
   // exactly as it did, including any row the migration has not reached.
   return !isSharedSpace(room);
+}
+
+/* ------------------------------------------------------------------
+   The "from" price the marketing pages quote.
+   ------------------------------------------------------------------ */
+
+/* The cheapest per-minute price on offer, in francs.
+
+   MEETING ROOMS ONLY, and that is the whole point of it living here.
+   A shared space's hour_rate_rwf buys ONE DESK for an hour, not a room,
+   so folding it into a minimum quotes "from 83 RWF a minute" — a seat
+   rate, for a product that is not sold by the minute at all, undercutting
+   the thing the sentence is actually about by a factor of six.
+
+   The USD version this replaced got that right by accident: it read the
+   retired "regularPrice", which is 0 on every desk, so a shared space
+   fell through to the default instead of being counted. Once the franc
+   column became the price, the accident stopped working — the desks
+   have a real hourly rate in it.
+
+   Falls back to PRICE_PER_MINUTE_RWF when there is no meeting room to
+   read, which is also what an empty or failed room query gives. */
+export function fromRwfPerMinute(rooms, rate) {
+  const perMinute = (rooms ?? [])
+    .filter(isMeetingRoom)
+    .map((room) => rwfPerMinuteFromRoom(room, rate))
+    .filter((value) => Number.isFinite(value) && value > 0);
+
+  return perMinute.length ? Math.min(...perMinute) : PRICE_PER_MINUTE_RWF;
 }
 
 /* ----------------------------- passes ---------------------------- */
@@ -259,18 +292,21 @@ export function daysInWindow(start, end) {
 /* What a pass costs, in both currencies, with the live rate supplied
    rather than looked up.
 
-   Each rate is stored in the currency it was QUOTED in, and converted
-   only for display — that is the whole reason two columns exist:
+   Every rate is stored in FRANCS and converted only for display:
 
-     day_rate_rwf    30,000 RWF is the real price of a day. The USD
-                     figure beside it is derived and moves with the
-                     market.
-     month_rate_usd  $100 is the real price of a month. The RWF figure
-                     beside it is derived and moves with the market.
+     hour_rate_rwf    one seat for one hour.
+     day_rate_rwf     one seat for one day.
+     month_rate_rwf   one seat for one month.
 
-   Converting in the other direction and storing the result would freeze
-   a rate into a price, which is the exact problem this work set out to
-   remove.
+   The monthly rate used to be the exception — month_rate_usd, quoted in
+   dollars, with the franc figure derived. That meant a monthly desk cost
+   a different number of francs every morning, which is not something a
+   published price may do. Migration 21 moved it to francs with the other
+   two; month_rate_usd is retired and read only as a fallback for a row
+   the migration has not reached.
+
+   The USD figures returned alongside are derived, and are what a card
+   checkout charges — see priceForMinutes in availability.js.
 
    `rate` is required rather than defaulted so that a caller which forgot
    to fetch the live rate gets the old constant only through an explicit
@@ -339,16 +375,24 @@ export function priceForPass({
   }
 
   if (passType === PASS_TYPES.MONTH) {
-    const perSeatPerMonth = ratePerSeat(room?.month_rate_usd);
+    /* month_rate_rwf since migration 21. A space the migration has not
+       reached still carries only the retired month_rate_usd, so that is
+       converted as a fallback — which keeps a deploy safe in either
+       order rather than reporting a monthly desk as unpriced. */
+    const perSeatPerMonth =
+      ratePerSeat(room?.month_rate_rwf) ??
+      (ratePerSeat(room?.month_rate_usd) === null
+        ? null
+        : rwfForUsd(ratePerSeat(room.month_rate_usd), rate));
     if (perSeatPerMonth === null) return null;
 
-    const usd = Math.round(perSeatPerMonth * seatCount * unitCount * 100) / 100;
+    const rwf = Math.round(perSeatPerMonth * seatCount * unitCount);
     return {
-      usd,
-      rwf: rwfForUsd(usd, rate),
-      quotedIn: "USD",
-      perSeatUsd: perSeatPerMonth,
-      perSeatRwf: rwfForUsd(perSeatPerMonth, rate),
+      rwf,
+      usd: usdForRwf(rwf, rate),
+      quotedIn: "RWF",
+      perSeatRwf: Math.round(perSeatPerMonth),
+      perSeatUsd: usdForRwf(perSeatPerMonth, rate),
     };
   }
 

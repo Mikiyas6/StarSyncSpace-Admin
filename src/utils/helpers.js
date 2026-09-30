@@ -30,18 +30,24 @@ export const formatCurrency = (value) =>
     value
   );
 
-// Rooms store one price — USD per HOUR (rooms.regularPrice) — and the
-// client derives what the customer actually sees (per-minute, in RWF) from
-// it, so admin only ever edits a single number per room. Kept in sync with
-// RWF_PER_USD in StarSyncSpace-Client/app/_lib/availability.js.
+/* Rooms store one price — RWF per HOUR (rooms.hour_rate_rwf) — and the
+   dollar figure a page shows beside it is derived from the LIVE rate, so
+   admin only ever edits a single number per room.
+
+   This constant is the last-resort fallback for that conversion, kept in
+   sync with RWF_PER_USD in the client's fx-math.js. It is not a price and
+   must not be used to compute one: anything that needs the live rate
+   takes it from useFxRate(). */
 export const RWF_PER_USD = 1470.59;
 
-// Takes a USD-per-MINUTE rate (divide the hourly regularPrice by 60 first)
-// and formats its RWF equivalent.
-export const formatRwfPerMinute = (usdPerMinute) =>
-  `${Math.round((Number(usdPerMinute) || 0) * RWF_PER_USD).toLocaleString(
-    "en-US"
-  )} RWF`;
+/* Francs, grouped, with the unit — "30,000 RWF".
+
+   It used to take a USD figure and multiply it by the constant above,
+   which meant every price in the rooms table was quoted at a rate from
+   2025 no matter what the currency had done since. Prices are in francs
+   now (migration 21), so there is nothing to convert. */
+export const formatRwfAmount = (rwf) =>
+  `${Math.round(Number(rwf) || 0).toLocaleString("en-US")} RWF`;
 
 // Menu prices are stored numerically with their own currency column (RWF by
 // default). Format as "12,000 RWF" so the display never depends on locale.

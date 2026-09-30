@@ -138,19 +138,29 @@ function App() {
                   their job. The admin-only controls are gated inside it. */}
               <Route path="inventory" element={<Inventory />} />
 
-              {/* Admin-only. RequireAdmin is a courtesy, not the lock —
-                  row-level security in the database refuses these writes
-                  whether or not anything rendered. It exists so a staff
-                  member who follows an old bookmark gets a sentence
-                  instead of a page of controls that all fail. */}
-              <Route
-                path="rooms"
-                element={
-                  <RequireAdmin what="Rooms">
-                    <Rooms />
-                  </RequireAdmin>
-                }
-              />
+              {/* Rooms and the menu are CATALOGUES, and the desk needs to
+                  read both: which rooms exist and what is free at four,
+                  what the kitchen serves and what it costs. They used to
+                  be wrapped in RequireAdmin, which answered the wrong
+                  question — it treated "may change the price list" and
+                  "may look at the price list" as one permission, and so
+                  handed a receptionist "This page is for admins" when
+                  they went to check availability.
+
+                  So the pages are open and the CONTROLS inside them are
+                  gated, on can.manageRooms and can.manageMenu. Nothing
+                  is lost by opening them: every write is refused by
+                  row-level security regardless of what rendered, and
+                  both tables are readable by anon anyway — they are what
+                  the public website is built from. */}
+              <Route path="rooms" element={<Rooms />} />
+              <Route path="menu" element={<Menu />} />
+
+              {/* Genuinely admin-only. RequireAdmin is a courtesy, not
+                  the lock — the database refuses these writes whether or
+                  not anything rendered. It exists so a staff member who
+                  follows an old bookmark gets a sentence instead of a
+                  page of controls that all fail. */}
               <Route
                 path="users"
                 element={
@@ -164,14 +174,6 @@ function App() {
                 element={
                   <RequireAdmin what="Settings">
                     <Settings />
-                  </RequireAdmin>
-                }
-              />
-              <Route
-                path="menu"
-                element={
-                  <RequireAdmin what="The menu">
-                    <Menu />
                   </RequireAdmin>
                 }
               />

@@ -41,7 +41,17 @@ export const STOCK_REASONS = {
     verb: "Remove",
     isSale: false,
     direction: -1,
-    adminOnly: false,
+    /* Admin-only, deliberately, though it is a decrement like a sale.
+
+       A sale is answerable to something: the money is there or it is
+       not, and the day's takings will disagree if a bottle left the
+       fridge without one. A removal is answerable to nothing — it is
+       the one line anybody can write that makes stock disappear with no
+       counterpart anywhere. Leaving it with staff makes "sold it and
+       kept the cash" indistinguishable from "took it out", by the
+       person recording it. So the desk sells, and anything that leaves
+       without money goes past an admin. */
+    adminOnly: true,
     help: "Taken out without being sold — swapped for something else, moved to the kitchen, pulled from the shelf. Reduces stock and does NOT affect sales.",
     tag: "silver",
   },
@@ -51,7 +61,8 @@ export const STOCK_REASONS = {
     verb: "Write off",
     isSale: false,
     direction: -1,
-    adminOnly: false,
+    // Same reasoning as `removal` above: stock leaves, no money arrives.
+    adminOnly: true,
     help: "Expired, spilt or broken. Reduces stock and does NOT affect sales.",
     tag: "coral",
   },
@@ -61,6 +72,11 @@ export const STOCK_REASONS = {
     verb: "Send to another room",
     isSale: false,
     direction: -1,
+    /* Stays with the desk, unlike the two above, because nothing is
+       lost: the stock is still the business's and still counted, just
+       in the other room. transfer_stock() writes both legs at once, so
+       a transfer cannot leave one room short without the other gaining
+       — which is exactly the counterpart `removal` and `waste` lack. */
     adminOnly: false,
     help: "Moved to a different room's fridge. Reduces stock here and does NOT affect sales.",
     tag: "silver",
@@ -104,7 +120,12 @@ export const STOCK_REASONS = {
 /* The two lists the UI offers, in the order a person would look for
    them. Separated by who may record them, so a screen never has to
    filter by `adminOnly` itself and accidentally offer staff a restock
-   that the database will refuse. */
+   that the database will refuse.
+
+   As of supabase/20 the staff list is `sale` and `transfer_out` only.
+   Mirrors the stock_movements insert policies — if these two ever
+   disagree, the database wins and the UI is the one offering somebody
+   work that fails. */
 export const STAFF_REASONS = Object.entries(STOCK_REASONS)
   .filter(([, meta]) => !meta.adminOnly)
   .map(([reason]) => reason);

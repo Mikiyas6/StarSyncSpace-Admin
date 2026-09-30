@@ -1,20 +1,15 @@
 import supabase, { supabaseUrl } from "./supabase";
 
-export async function signupApi({ fullName, email, password }) {
-  let { data, error } = await supabase.auth.signUp({
-    email,
-    password,
-    options: {
-      data: { fullName },
-      avatar: "",
-    },
-  });
-  if (error) {
-    console.error("Error signing up:", error.message);
-    throw new Error(error.message);
-  }
-  return data;
-}
+/* signupApi was here, and it is gone on purpose.
+
+   It called supabase.auth.signUp from the browser, which signs the NEW
+   account in — so "add a member of staff" signed the admin out of their
+   own session and into the new one. It also produced an account that
+   could not sign in, because this project requires email confirmation.
+
+   Creating a login now happens on a server, in
+   services/apiCreateTeamMember.js → the Client site's
+   POST /api/admin/team. Nothing in a browser should call signUp again. */
 
 export async function loginApi({ email, password }) {
   let { data, error } = await supabase.auth.signInWithPassword({

@@ -28,8 +28,15 @@ import { useUser } from "./useUser";
 
 export const ROLES = { ADMIN: "admin", STAFF: "staff" };
 
+/* Two different nothings.
+
+   "The table would not answer" and "the table answered, and this person
+   is not in it" used to come back as the same null, and the fallback
+   below guessed ADMIN for both. That was right for the first and wrong
+   for the second — see the note on `role` — so they are told apart here
+   rather than conflated and guessed about. */
 async function getAdminRecord(userId) {
-  if (!userId) return null;
+  if (!userId) return { status: "unknown", admin: null };
 
   const { data, error } = await supabase
     .from("admins")
@@ -39,19 +46,18 @@ async function getAdminRecord(userId) {
 
   if (error) {
     // The migration has not been run yet, or `admins` is unreachable.
-    // Returning null means "no role", and the caller below decides what
-    // to do about it — see the comment on `role`.
     console.error("[useAdminRole]", error.message);
-    return null;
+    return { status: "unknown", admin: null };
   }
 
-  return data;
+  // A clean read that found nobody. This login has no role at all.
+  return { status: data ? "found" : "missing", admin: data ?? null };
 }
 
 export function useAdminRole() {
   const { user, isLoading: isLoadingUser } = useUser();
 
-  const { data: admin, isLoading: isLoadingRole } = useQuery({
+  const { data: record, isLoading: isLoadingRole } = useQuery({
     queryKey: ["admin-role", user?.id],
     queryFn: () => getAdminRecord(user?.id),
     enabled: Boolean(user?.id),
@@ -62,29 +68,36 @@ export function useAdminRole() {
   });
 
   const isLoading = isLoadingUser || isLoadingRole;
+  const admin = record?.admin ?? null;
 
   /* ------------------------------------------------------------------
      What happens when there is no admins row.
 
-     `admin` deliberately falls back to the ADMIN role rather than STAFF,
-     and the reasoning is worth spelling out because the cautious-looking
-     choice is the wrong one here:
+     There are two ways to have none, and they want opposite answers.
+
+     The table would not answer ("unknown"). Almost always the migration
+     has not been run. Falling back to ADMIN is right here:
 
        · this is not the security boundary — RLS is. Guessing generously
          grants nothing, because every write still has to satisfy a
          policy in the database;
-       · the only way to have no row is for the migration not to have run
-         yet. Defaulting to STAFF in that state would hide Rooms,
-         Settings, the Menu and the team page from the ONLY existing user
-         — an apparently broken dashboard, with no visible cause;
-       · and once the migration HAS run, every login has a row (a trigger
-         on auth.users creates one), so this branch stops being reachable.
+       · defaulting to STAFF in that state would hide Rooms, Settings,
+         the Menu and the team page from the ONLY existing user — an
+         apparently broken dashboard, with no visible cause.
 
-     So: before the migration, the UI looks exactly as it does today and
-     the database is as permissive as it is today. After it, the roles are
-     real on both sides.
+     The table answered and this login is not in it ("missing"). This was
+     assumed unreachable — a trigger on auth.users creates a row with
+     every login — and on 2026-09-30 it turned out not to be: deleting
+     somebody from `admins` in the Supabase table editor does not delete
+     their login, and leaves exactly this. Guessing ADMIN for them draws
+     the whole dashboard for somebody RLS will refuse every single
+     action, which is the "here is a bug to report" failure the note at
+     the top of this file warns against. They get no role, and
+     `hasNoRole` below says why.
      ------------------------------------------------------------------ */
-  const role = admin?.role ?? (isLoading ? null : ROLES.ADMIN);
+  const role =
+    admin?.role ??
+    (isLoading || record?.status === "missing" ? null : ROLES.ADMIN);
   const isAdmin = role === ROLES.ADMIN;
   const isStaff = role === ROLES.STAFF;
 
@@ -99,6 +112,12 @@ export function useAdminRole() {
        is_active), so the UI should say so rather than showing a
        dashboard where each action fails on its own. */
     isDeactivated: admin ? admin.is_active === false : false,
+
+    /* A login that exists with no role at all — see the note above. It
+       is not the same as deactivated (which is deliberate and
+       reversible from the team page) and not the same as staff, so it
+       cannot borrow either one's explanation. */
+    hasNoRole: record?.status === "missing",
 
     /* Named capabilities rather than `isAdmin` sprinkled through the
        components. Two reasons: a screen reads better when it says what
@@ -115,11 +134,28 @@ export function useAdminRole() {
       deleteBookings: isAdmin,
       viewRevenue: isAdmin,
 
+      /* Looking, for both roles, at the two catalogues the desk needs
+         in front of it to do its job: which rooms exist and what is
+         free, and what the kitchen actually serves. Deliberately
+         separate from manageRooms / manageMenu above — reading a price
+         list and setting a price are different questions, and rolling
+         them into one capability is what shut staff out of the rooms
+         page entirely. */
+      viewRooms: Boolean(role),
+      viewMenu: Boolean(role),
+
       // The day job, for both roles.
       takeBookings: Boolean(role),
       changeBookingStatus: Boolean(role),
-      sellStock: Boolean(role), // sale, and the removals below
-      removeStock: Boolean(role), // removal / waste / transfer out
+      sellStock: Boolean(role), // sale — the desk's whole job here
+      /* Taking stock out WITHOUT a sale. Admin-only since supabase/20:
+         a removal or a write-off is the one line that makes stock
+         vanish with no money to reconcile it against, so it does not
+         belong to the person who would otherwise be reconciled. */
+      removeStock: isAdmin, // removal / waste
+      /* Moving it between rooms stays desk work — both legs are written
+         at once, so nothing goes missing. */
+      transferStock: Boolean(role), // transfer out
       moderateReviews: Boolean(role),
     },
   };

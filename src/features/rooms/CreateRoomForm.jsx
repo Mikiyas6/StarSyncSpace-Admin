@@ -10,6 +10,7 @@ import { useCreateRoom } from "./useCreateRoom";
 import { useEditRoom } from "./useEditRoom";
 import RoomImagesManager from "./RoomImagesManager";
 import { formatMenuPrice } from "../../utils/helpers";
+import { usdForRwf } from "../../utils/fx";
 import { useFxRate } from "../fx/useFxRate";
 const FormRow = styled.div`
   display: grid;
@@ -70,7 +71,9 @@ function CreateRoomForm({ roomToEdit = {}, onCloseModal }) {
       defaultValues: isEditSession ? editValues : {},
     });
   const { errors } = formState;
-  const watchedPrice = watch("regularPrice");
+  /* The hourly franc rate, which is the price for BOTH kinds of room:
+     a whole meeting room for an hour, or one desk for an hour. */
+  const watchedHourly = watch("hour_rate_rwf");
 
   /* A room is one of two completely different products, and which one it
      is decides which prices even make sense. Watched rather than read
@@ -81,7 +84,7 @@ function CreateRoomForm({ roomToEdit = {}, onCloseModal }) {
 
   const watchedHourRate = watch("hour_rate_rwf");
   const watchedDayRate = watch("day_rate_rwf");
-  const watchedMonthRate = watch("month_rate_usd");
+  const watchedMonthRate = watch("month_rate_rwf");
 
   /* The live rate, so every "≈" on this form is today's conversion rather
      than a number that was true when the code was written. */
@@ -110,10 +113,30 @@ function CreateRoomForm({ roomToEdit = {}, onCloseModal }) {
     // The discount input is not rendered for a shared space, so nothing
     // would arrive for a NOT NULL column.
     if (shared) data.discount = 0;
-    data.hour_rate_rwf = shared ? numberOrNull(data.hour_rate_rwf) : null;
+
+    /* hour_rate_rwf belongs to BOTH kinds of room since migration 21 —
+       a whole room for an hour, or one desk for an hour — so unlike the
+       day and month rates it is never nulled out. It used to be
+       shared-space-only, with meeting rooms priced from the retired USD
+       column. */
+    data.hour_rate_rwf = numberOrNull(data.hour_rate_rwf);
     data.day_rate_rwf = shared ? numberOrNull(data.day_rate_rwf) : null;
-    data.month_rate_usd = shared ? numberOrNull(data.month_rate_usd) : null;
-    if (shared) data.regularPrice = 0;
+    data.month_rate_rwf = shared ? numberOrNull(data.month_rate_rwf) : null;
+
+    /* The retired USD columns, written as the conversion of the franc
+       price rather than left to contradict it.
+
+       TRANSITIONAL. Nothing reads them (see migration 21) — they are
+       kept in step only so that an already-deployed build still
+       selecting them during a rollout quotes roughly the right money
+       instead of a price from before this edit. Drop both columns, and
+       these four lines, once both apps have shipped. */
+    data.regularPrice = shared
+      ? 0
+      : usdForRwf(numberOrNull(data.hour_rate_rwf) ?? 0, rwfPerUsd);
+    data.month_rate_usd = shared
+      ? usdForRwf(numberOrNull(data.month_rate_rwf) ?? 0, rwfPerUsd) || null
+      : null;
     if (isEditSession)
       editRoom(
         { newRoomData: { ...data, image }, id: editId },
@@ -277,96 +300,93 @@ function CreateRoomForm({ roomToEdit = {}, onCloseModal }) {
           </FormRow>
 
           <FormRow>
-            <label htmlFor="month_rate_usd">
-              Monthly desk — price of ONE SEAT for ONE MONTH (USD)
+            <label htmlFor="month_rate_rwf">
+              Monthly desk — price of ONE SEAT for ONE MONTH (RWF)
             </label>
             <Input
               disabled={isWorking}
               type="number"
-              step="0.01"
+              step="1"
               min="0"
-              id="month_rate_usd"
-              {...register("month_rate_usd", {
+              id="month_rate_rwf"
+              {...register("month_rate_rwf", {
                 required: "A shared space needs a monthly seat rate",
-                min: { value: 0.01, message: "Rate must be greater than 0" },
+                min: { value: 1, message: "Rate must be greater than 0" },
               })}
             />
-            {errors?.month_rate_usd?.message ? (
-              <Error>{errors.month_rate_usd.message}</Error>
+            {errors?.month_rate_rwf?.message ? (
+              <Error>{errors.month_rate_rwf.message}</Error>
             ) : watchedMonthRate ? (
               <Hint>
-                ≈{" "}
-                {formatMenuPrice(
-                  Math.round(watchedMonthRate * rwfPerUsd),
-                  "RWF",
-                )}{" "}
-                per seat per month, at today&apos;s rate of{" "}
+                ≈ ${usdForRwf(watchedMonthRate, rwfPerUsd).toFixed(2)} per seat
+                per month, at today&apos;s rate of{" "}
                 {Math.round(rwfPerUsd).toLocaleString("en-US")} RWF to the
                 dollar{isIndicative ? " (indicative)" : ""}
                 {watchedDayRate
                   ? ` — about ${Math.round(
-                      (watchedMonthRate * rwfPerUsd) / watchedDayRate,
+                      watchedMonthRate / watchedDayRate,
                     )} days' worth of day passes`
                   : ""}
               </Hint>
             ) : (
               <Hint>
-                Quoted in USD because that is how it was priced. What a
-                customer sees in RWF is converted at the live rate, so it
-                stays right as the rate moves.
+                In RWF, like every other rate. This price is what a customer
+                pays; the dollar figure beside it is only today&apos;s
+                conversion and is never stored.
               </Hint>
             )}
           </FormRow>
         </>
       ) : (
         <FormRow>
-          <label htmlFor="regularPrice">
-            Price per hour (USD) — clients are billed per minute, converted to
-            RWF automatically
+          <label htmlFor="hour_rate_rwf">
+            Price per hour (RWF) — clients are billed per minute
           </label>
           <Input
             disabled={isWorking}
             type="number"
-            step="0.01"
-            id="regularPrice"
-            {...register("regularPrice", {
+            step="1"
+            min="0"
+            id="hour_rate_rwf"
+            {...register("hour_rate_rwf", {
               required: "This field is required",
-              min: { value: 0.01, message: "Price must be greater than 0" },
+              min: { value: 1, message: "Price must be greater than 0" },
             })}
           />
-          {errors?.regularPrice?.message ? (
-            <Error>{errors.regularPrice.message}</Error>
-          ) : watchedPrice ? (
+          {errors?.hour_rate_rwf?.message ? (
+            <Error>{errors.hour_rate_rwf.message}</Error>
+          ) : watchedHourly ? (
             <Hint>
-              ≈ ${(watchedPrice / 60).toFixed(2)}/min ·{" "}
-              {formatMenuPrice(
-                Math.round((watchedPrice / 60) * rwfPerUsd),
-                "RWF",
-              )}
-              /min, at today&apos;s rate
-              {isIndicative ? " (indicative)" : ""}
+              {formatMenuPrice(Math.round(watchedHourly / 60), "RWF")}/min ·
+              &nbsp;≈ ${usdForRwf(watchedHourly, rwfPerUsd).toFixed(2)}/hr at
+              today&apos;s rate
+              {isIndicative ? " (indicative)" : ""}. The franc price is what is
+              charged — it does not move when the exchange rate does.
             </Hint>
           ) : null}
         </FormRow>
       )}
-      {/* Discount is a reduction on the HOURLY price, and a shared space
-          has no hourly price — with regularPrice forced to 0, the old
-          "discount must be less than the price" rule could only ever be
-          satisfied by 0, so a required field became an unanswerable
-          question. Seat passes are discounted by the monthly rate itself,
-          which is already a fraction of the daily one. */}
+      {/* Discount is a reduction on the HOURLY price, in francs like the
+          price it comes off. A shared space is not shown it: seat passes
+          are discounted by the monthly rate itself, which is already a
+          fraction of the daily one, and with no whole-room hourly price
+          to measure against the old "must be less than the price" rule
+          could only ever be satisfied by 0 — a required field that was an
+          unanswerable question. */}
       {isSharedSpace ? null : (
         <FormRow>
-          <label htmlFor="discount">Discount</label>
+          <label htmlFor="discount">Discount per hour (RWF)</label>
           <Input
             disabled={isWorking}
             type="number"
+            step="1"
+            min="0"
             id="discount"
             {...register("discount", {
               required: "This field is required",
               validate: (value) =>
-                Number(value) <= Number(getValues().regularPrice) ||
-                "Discount should be less than regular price",
+                Number(value) <= Number(getValues().hour_rate_rwf) ||
+                "Discount should be less than the hourly price",
             })}
           />
           {errors?.discount?.message && (

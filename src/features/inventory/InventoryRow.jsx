@@ -336,21 +336,34 @@ function InventoryRow({ row }) {
                 <Menus.Button icon={<ShoppingCart />}>Sell</Menus.Button>
               </Modal.Open>
 
-              <Modal.Open opens="remove">
-                <Menus.Button icon={<Undo2 />}>
-                  Remove (not a sale)
-                </Menus.Button>
-              </Modal.Open>
+              {/* Stock leaving without money: admin-only. Gated on its
+                  own capability rather than can.manageStock, because
+                  that one means "decides what the business carries"
+                  (restocking, par levels, delisting) and this one means
+                  "may make stock disappear" — same answer today, but
+                  they are different questions and would not stay the
+                  same answer if a third role ever appeared. */}
+              {can.removeStock ? (
+                <>
+                  <Modal.Open opens="remove">
+                    <Menus.Button icon={<Undo2 />}>
+                      Remove (not a sale)
+                    </Menus.Button>
+                  </Modal.Open>
 
-              <Modal.Open opens="waste">
-                <Menus.Button icon={<Trash2 />}>Write off</Menus.Button>
-              </Modal.Open>
+                  <Modal.Open opens="waste">
+                    <Menus.Button icon={<Trash2 />}>Write off</Menus.Button>
+                  </Modal.Open>
+                </>
+              ) : null}
 
-              <Modal.Open opens="transfer">
-                <Menus.Button icon={<ArrowRightLeft />}>
-                  Send to another room
-                </Menus.Button>
-              </Modal.Open>
+              {can.transferStock ? (
+                <Modal.Open opens="transfer">
+                  <Menus.Button icon={<ArrowRightLeft />}>
+                    Send to another room
+                  </Menus.Button>
+                </Modal.Open>
+              ) : null}
 
               {/* Photos belong to the ITEM, so this is gated on the menu
                   capability rather than the stock one: a person who may

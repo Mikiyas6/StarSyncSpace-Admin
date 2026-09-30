@@ -24,7 +24,12 @@ function booking({
   roomName = "Meeting Room 01",
   roomId = 1,
   amountRwf = 30000,
-  totalPrice = 20,
+  /* Derived from amountRwf at RATE unless a test says otherwise, because
+     the two have to agree: bookingRevenueRwf cross-checks the frozen RWF
+     total against the booking's own USD price and discards the freeze
+     when they cannot both be true. A fixture carrying 90,000 RWF against
+     a 20-dollar room is not a booking, it is the bug. */
+  totalPrice = amountRwf == null ? 20 : amountRwf / RATE,
   status = "completed",
   isPaid = true,
   createdAt = "2026-09-20T10:00:00Z",
@@ -125,6 +130,7 @@ describe("what a booking brought in", () => {
     expect(bookingRevenueRwf(paid, RATE)).toEqual({
       rwf: 29411,
       estimated: false,
+      restated: false,
     });
     // A different rate must not change a charge already taken.
     expect(bookingRevenueRwf(paid, 1700).rwf).toBe(29411);
@@ -135,7 +141,49 @@ describe("what a booking brought in", () => {
     expect(bookingRevenueRwf(legacy, RATE)).toEqual({
       rwf: 30000,
       estimated: true,
+      restated: false,
     });
+  });
+
+  /* The 60,000 RWF card.
+
+     Booking 504 was taken as two hours — 40.80 USD, frozen at 60,000 RWF
+     — and later became an eighty-minute booking worth 27.20 USD without
+     its RWF total being recomputed. The freeze then implied 2,206 RWF to
+     the dollar, a rate no day has ever had, and the dashboard reported
+     half again as much money as the room actually took. Preferring the
+     frozen figure is right only while it can still be true of the
+     booking's own price. */
+  it("discards a frozen amount that cannot be true of the booking's own price", () => {
+    const shortened = booking({ amountRwf: 60000, totalPrice: 27.2 });
+    const result = bookingRevenueRwf(shortened, 1476.645);
+
+    expect(result.rwf).toBe(40165);
+    expect(result.estimated).toBe(true);
+    expect(result.restated).toBe(true);
+    // What was thrown away, so a screen can say what it corrected.
+    expect(result.frozenRwf).toBe(60000);
+  });
+
+  /* The other half of the same rule, and the more important one: a freeze
+     taken at its own day's rate MUST survive, or every report starts
+     moving with the currency. 1,300 to the dollar against a reference of
+     1,500 is thirteen percent of drift — a year of history, not a fault. */
+  it("keeps a frozen amount that is merely from a day with a different rate", () => {
+    const lastYear = booking({ amountRwf: 26000, totalPrice: 20 });
+    const result = bookingRevenueRwf(lastYear, RATE);
+
+    expect(result.rwf).toBe(26000);
+    expect(result.estimated).toBe(false);
+    expect(result.restated).toBe(false);
+  });
+
+  /* Nothing to cross-check against: an old row with a frozen total and no
+     USD price is still the best evidence there is. */
+  it("trusts a frozen amount when there is no USD price to check it against", () => {
+    expect(
+      bookingRevenueRwf({ amount_rwf: 45000, totalPrice: null }, RATE),
+    ).toEqual({ rwf: 45000, estimated: false });
   });
 
   it("is zero for a booking with no money on it at all", () => {
@@ -235,6 +283,27 @@ describe("revenueByStream", () => {
     });
     expect(totals.estimatedRwf).toBe(30000);
     expect(totals.total).toBe(30000);
+    /* Nothing was CORRECTED here — that row simply has nothing frozen —
+       so the fault counter stays at zero and the caveat can tell the two
+       apart. */
+    expect(totals.restatedRwf).toBe(0);
+    expect(totals.restatedCount).toBe(0);
+  });
+
+  it("counts the bookings whose frozen total had to be thrown away", () => {
+    const totals = revenueByStream({
+      bookings: [
+        booking({ amountRwf: 60000, totalPrice: 27.2 }),
+        booking({ amountRwf: 30000 }),
+      ],
+      movements: [],
+      rate: 1476.645,
+    });
+
+    expect(totals.restatedCount).toBe(1);
+    expect(totals.restatedRwf).toBe(40165);
+    // 40,165 restated + 30,000 taken as charged.
+    expect(totals[STREAMS.MEETING_ROOMS]).toBe(70165);
   });
 
   it("is all zeroes with nothing to report, rather than NaN", () => {

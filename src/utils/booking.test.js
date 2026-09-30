@@ -17,7 +17,7 @@ import {
   roundUpToStep,
   statusLabel,
   statusTag,
-  usdPerMinuteFromRoom,
+  rwfPerMinuteFromRoom,
   validateAdminBooking,
 } from "./booking";
 
@@ -35,7 +35,16 @@ const OFFICE_HOURS = {
   business_hours_end: "20:00",
 };
 
-const ROOM = { id: 1, name: "001", regularPrice: 20, maxCapacity: 2 };
+/* Both price columns, as a live row looks after migration 21: 30,000 RWF
+   an hour is the price, and the retired 20.40 USD is still sitting beside
+   it. Keeping both is what proves the franc column wins. */
+const ROOM = {
+  id: 1,
+  name: "001",
+  hour_rate_rwf: 30000,
+  regularPrice: 20.4,
+  maxCapacity: 2,
+};
 
 const NOW = new Date("2026-06-15T09:00:00");
 const MINUTE = 60 * 1000;
@@ -193,7 +202,7 @@ describe("24-hour bookings", () => {
       settings: OPEN_24_7,
       existingBookings: [],
     });
-    expect(value.usd).toBe(480); // $20/hr × 24
+    expect(value.rwf).toBe(720_000); // 30,000 RWF/hr × 24
     expect(value.end.getTime() - value.start.getTime()).toBe(24 * 60 * MINUTE);
   });
 
@@ -376,14 +385,15 @@ describe("validateAdminBooking, given an end time", () => {
   });
 
   it("prices an end time the old dropdown could not express", () => {
-    // 20/hr for 1 hr 50 min. No interval list would have offered this.
+    // 30,000 RWF/hr for 1 hr 50 min. No interval list would have offered
+    // this, and the franc total comes out whole rather than to the cent.
     const { value } = validateAdminBooking({
       ...base,
       start: at("13:00"),
       end: at("14:50"),
     });
     expect(value.durationMinutes).toBe(110);
-    expect(value.usd).toBe(36.67);
+    expect(value.rwf).toBe(55_000);
   });
 
   it("keeps endTime and duration_minutes in step, to the minute", () => {
@@ -627,18 +637,59 @@ describe("clash detection", () => {
    Money and presentation
    ================================================================ */
 describe("pricing", () => {
-  it("reads regularPrice as an hourly rate", () => {
-    expect(usdPerMinuteFromRoom({ regularPrice: 60 })).toBe(1);
-    expect(usdPerMinuteFromRoom({ regularPrice: 0 })).toBe(0);
-    expect(usdPerMinuteFromRoom(null)).toBe(0);
+  it("reads hour_rate_rwf as an hourly rate", () => {
+    expect(rwfPerMinuteFromRoom({ hour_rate_rwf: 30000 })).toBe(500);
+    expect(rwfPerMinuteFromRoom({ hour_rate_rwf: 0 })).toBe(0);
+    expect(rwfPerMinuteFromRoom(null)).toBe(0);
+  });
+
+  /* hour_rate_rwf wins over the retired dollar column. A room repriced
+     in francs must not be quoted from the figure it left behind. */
+  it("prefers the franc rate over the retired USD one", () => {
+    expect(rwfPerMinuteFromRoom(ROOM)).toBe(500);
+    expect(
+      rwfPerMinuteFromRoom({ hour_rate_rwf: 36000, regularPrice: 20.4 }),
+    ).toBe(600);
+  });
+
+  /* A room the migration has not reached carries only the dollar column,
+     so it is converted rather than priced at zero — which is what makes
+     deploying this in either order safe. */
+  it("falls back to converting the retired USD rate", () => {
+    expect(rwfPerMinuteFromRoom({ regularPrice: 20.4 }, 1470.59)).toBe(500);
   });
 
   it("charges a 15-minute booking a quarter of the hourly rate", () => {
-    expect(priceForMinutes(15, usdPerMinuteFromRoom(ROOM)).usd).toBe(5);
+    expect(priceForMinutes(15, rwfPerMinuteFromRoom(ROOM)).rwf).toBe(7500);
   });
 
-  it("converts to RWF from the USD total", () => {
-    expect(priceForMinutes(60, usdPerMinuteFromRoom(ROOM)).rwf).toBe(29412);
+  /* The whole point of pricing in francs, and the bug behind the 60,000
+     RWF card. The exchange rate used to reach into the price: two hours
+     was 40.80 USD times whichever rate was in scope, which froze 60,000
+     RWF onto a booking at the 2025 constant while the desk was quoting
+     something else. Now the rate cannot touch the franc total at all. */
+  it("does not move the franc price when the exchange rate moves", () => {
+    const perMinute = rwfPerMinuteFromRoom(ROOM);
+    expect(priceForMinutes(120, perMinute, 1470.59).rwf).toBe(60000);
+    expect(priceForMinutes(120, perMinute, 1476.645).rwf).toBe(60000);
+    expect(priceForMinutes(120, perMinute, 1900).rwf).toBe(60000);
+
+    // The DOLLAR figure is the derived one, so it does move.
+    expect(priceForMinutes(120, perMinute, 1470.59).usd).toBe(40.8);
+    expect(priceForMinutes(120, perMinute, 1900).usd).toBe(31.58);
+  });
+
+  it("freezes the franc total, and the day's USD beside it", () => {
+    const { value } = validateAdminBooking({
+      start: new Date("2026-09-25T10:00:00Z"),
+      end: new Date("2026-09-25T12:00:00Z"),
+      room: ROOM,
+      settings: OPEN_24_7,
+      rate: 1476.645,
+    });
+
+    expect(value.rwf).toBe(60000);
+    expect(value.usd).toBe(40.63);
   });
 });
 

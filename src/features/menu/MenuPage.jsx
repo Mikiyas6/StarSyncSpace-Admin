@@ -10,6 +10,7 @@ import { useMenuOverview } from "./useMenuOverview";
 import MenuTable from "./MenuTable";
 import CreateMenuItemForm from "./CreateMenuItemForm";
 import SectionsManager from "./SectionsManager";
+import { useAdminRole } from "../authentication/useAdminRole";
 
 const StyledMenu = styled.div`
   display: flex;
@@ -74,6 +75,7 @@ function MenuPage() {
     error,
     ensureCategories,
   } = useMenuOverview();
+  const { can } = useAdminRole();
   const [categoryId, setCategoryId] = useState("");
 
   if (isLoading) return <Spinner />;
@@ -97,24 +99,30 @@ function MenuPage() {
       <PageHeader>
         <div>
           <Heading as="h1">Restaurant menu</Heading>
+          {/* The page says different things to the two roles, because
+              "Manage categories, sections and items" is an instruction
+              staff cannot follow and would read as a broken screen. */}
           <Description>
-            Manage categories, sections and items. Changes appear on the
-            customer menu at /menu shortly after saving.
+            {can.manageMenu
+              ? "Manage categories, sections and items. Changes appear on the customer menu at /menu shortly after saving."
+              : "What the kitchen serves and what it costs. Adding or changing items is an admin's job — ask one if something here is wrong."}
           </Description>
         </div>
-        <Modal>
-          <Modal.Open opens="add-item">
-            <Button>
-              <ButtonContent>
-                <Plus />
-                Add menu item
-              </ButtonContent>
-            </Button>
-          </Modal.Open>
-          <Modal.Window name="add-item">
-            <CreateMenuItemForm />
-          </Modal.Window>
-        </Modal>
+        {can.manageMenu ? (
+          <Modal>
+            <Modal.Open opens="add-item">
+              <Button>
+                <ButtonContent>
+                  <Plus />
+                  Add menu item
+                </ButtonContent>
+              </Button>
+            </Modal.Open>
+            <Modal.Window name="add-item">
+              <CreateMenuItemForm />
+            </Modal.Window>
+          </Modal>
+        ) : null}
       </PageHeader>
 
       <Tabs role="tablist" aria-label="Menu category">
@@ -143,23 +151,29 @@ function MenuPage() {
         <MenuTable categoryId={categoryId} />
       </div>
 
-      <div>
-        <Heading as="h2">Sections</Heading>
-        <p style={{ fontSize: "1.3rem", color: "var(--color-grey-500)", margin: "0.8rem 0 1.6rem" }}>
-          Create, rename, hide or reorder sections — and the items inside
-          them.
-        </p>
-        <Modal>
-          <Modal.Open opens="sections">
-            <Button variation="secondary">
-              Open section management
-            </Button>
-          </Modal.Open>
-          <Modal.Window name="sections">
-            <SectionsManager defaultCategoryId={categoryId || undefined} />
-          </Modal.Window>
-        </Modal>
-      </div>
+      {/* Section management is create / rename / hide / reorder from top
+          to bottom — there is no read-only half of it worth showing, so
+          for staff the whole block goes rather than a heading over a
+          button they cannot press. */}
+      {can.manageMenu ? (
+        <div>
+          <Heading as="h2">Sections</Heading>
+          <p style={{ fontSize: "1.3rem", color: "var(--color-grey-500)", margin: "0.8rem 0 1.6rem" }}>
+            Create, rename, hide or reorder sections — and the items inside
+            them.
+          </p>
+          <Modal>
+            <Modal.Open opens="sections">
+              <Button variation="secondary">
+                Open section management
+              </Button>
+            </Modal.Open>
+            <Modal.Window name="sections">
+              <SectionsManager defaultCategoryId={categoryId || undefined} />
+            </Modal.Window>
+          </Modal>
+        </div>
+      ) : null}
     </StyledMenu>
   );
 }

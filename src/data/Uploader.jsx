@@ -58,8 +58,15 @@ async function createBookings() {
     const startTime = new Date(booking.startTime);
     const endTime = addHours(startTime, 2);
     const numHours = differenceInHours(endTime, startTime);
-    const cabinPrice = numHours * (room.regularPrice - room.discount);
-    const totalPrice = cabinPrice;
+    /* Francs, like every other price since migration 21. cabinPrice and
+       totalPrice are the retired USD pair on `bookings`, and this dev
+       seeder fills them with the franc figure rather than a stale dollar
+       one — amount_rwf below is the number anything reads. */
+    const amountRwf = Math.round(
+      numHours * (Number(room.hour_rate_rwf) - (Number(room.discount) || 0)),
+    );
+    const cabinPrice = amountRwf;
+    const totalPrice = amountRwf;
 
     let status;
     if (
@@ -88,6 +95,7 @@ async function createBookings() {
       cabinPrice,
       extrasPrice: 0,
       totalPrice,
+      amount_rwf: amountRwf,
       guestId: allGuestIds.at(booking.guestId - 1),
       roomId: allRoomIds.at(booking.roomId - 1),
       status,

@@ -322,9 +322,28 @@ function RevenueBreakdown({
       {isEstimated && totals.estimatedRwf > 0 ? (
         <Caption style={{ gridColumn: "1 / -1" }}>
           {rwf(totals.estimatedRwf)} of this was converted from USD at
-          today&apos;s rate, because those bookings predate the column that
-          records what was actually charged. Everything else is the amount taken
-          at the time.
+          today&apos;s rate rather than read off the booking.{" "}
+          {totals.restatedCount > 0 ? (
+            <>
+              {/* Only worth naming the amount again when it is not simply
+                  all of the figure in the sentence before this one. */}
+              {totals.restatedRwf < totals.estimatedRwf
+                ? `${rwf(totals.restatedRwf)} of that is `
+                : "That is "}
+              {totals.restatedCount} booking
+              {totals.restatedCount === 1 ? "" : "s"} whose stored RWF total
+              cannot be true of its own USD price — frozen against a length the
+              booking is no longer for — so the USD price was used instead.
+              Worth correcting on the booking rather than caveating here
+              forever.{" "}
+            </>
+          ) : (
+            <>
+              Those bookings predate the column that records what was actually
+              charged.{" "}
+            </>
+          )}
+          Everything else is the amount taken at the time.
         </Caption>
       ) : null}
 

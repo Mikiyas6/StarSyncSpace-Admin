@@ -1,9 +1,10 @@
 /* The team: who works here, and which of the two roles they hold.
 
    `admins` rows are keyed by the Supabase auth user, one per login, and
-   created by a trigger the moment a login is (see 05-admin-roles.sql) —
-   so nothing here creates them. What this file does is read the team and
-   change roles.
+   created by a trigger the moment a login is (see 05-admin-roles.sql).
+   What this file does is read the team and change roles; creating the
+   login itself cannot be done from a browser at all, and lives in
+   apiCreateTeamMember.js with the explanation of why.
 
    Why there is no delete
    ----------------------

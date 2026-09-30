@@ -11,6 +11,9 @@ import {
   YAxis,
 } from "recharts";
 import { eachDayOfInterval, format, isSameDay } from "date-fns";
+import { formatRwf } from "../../utils/fx";
+import { useFxRate } from "../fx/useFxRate";
+import { bookingRevenueRwf } from "./revenue";
 
 const StyledSalesChart = styled(DashboardBox)`
   grid-column: 1 / -1;
@@ -23,7 +26,21 @@ const StyledSalesChart = styled(DashboardBox)`
   }
 `;
 
+/* Four digits of francs on every tick is a wall of numbers where an
+   axis should be, so the axis goes compact ("40K") and the tooltip — the
+   place you look when you want the actual figure — carries it in full. */
+const compactRwf = new Intl.NumberFormat("en-US", {
+  notation: "compact",
+  maximumFractionDigits: 1,
+});
+
 function SalesChart({ bookings, startDate, endDate }) {
+  /* In RWF, like the rest of the dashboard. The room is priced in USD;
+     this converts with the same bookingRevenueRwf() the revenue section
+     uses, so a day's bar and that day's share of the "Meeting rooms"
+     card are the same money. */
+  const { rate } = useFxRate();
+
   const allDates = eachDayOfInterval({
     start: startDate,
     end: endDate,
@@ -34,7 +51,7 @@ function SalesChart({ bookings, startDate, endDate }) {
       label: format(date, "MMM dd"),
       totalSales: bookings
         ?.filter((booking) => isSameDay(date, new Date(booking.created_at)))
-        .reduce((acc, cur) => acc + cur.totalPrice, 0),
+        .reduce((acc, cur) => acc + bookingRevenueRwf(cur, rate).rwf, 0),
     };
   });
 
@@ -63,12 +80,16 @@ function SalesChart({ bookings, startDate, endDate }) {
             minTickGap={20}
           />
           <YAxis
-            unit="$"
             tick={{ fill: colors.text }}
             tickLine={{ stroke: colors.text }}
+            tickFormatter={(value) => compactRwf.format(Number(value) || 0)}
+            width={56}
           />
           <CartesianGrid strokeDasharray="4" />
-          <Tooltip contentStyle={{ backgroundColor: colors.background }} />
+          <Tooltip
+            contentStyle={{ backgroundColor: colors.background }}
+            formatter={(value) => formatRwf(value)}
+          />
           <Area
             dataKey="totalSales"
             type="monotone"
@@ -76,7 +97,6 @@ function SalesChart({ bookings, startDate, endDate }) {
             fill={colors.totalSales.fill}
             strokeWidth={2}
             name="Room sales"
-            unit="$"
           />
         </AreaChart>
       </ResponsiveContainer>

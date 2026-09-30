@@ -62,13 +62,18 @@ export async function getBooking(id) {
 }
 
 // Returns all BOOKINGS that are were created after the given date. Useful to get bookings created in the last 30 days, for example.
+//
+// amount_rwf comes along because the dashboard's "Sales" tile reports in
+// RWF, and it does so through the same bookingRevenueRwf() as the revenue
+// section — which needs the frozen figure AND the USD total to tell a
+// healthy freeze from one that no longer matches the booking's price.
 export async function getBookingsAfterDate(
   date,
   endDate = getToday({ end: true })
 ) {
   const { data, error } = await supabase
     .from("bookings")
-    .select("created_at, totalPrice, extrasPrice")
+    .select("created_at, totalPrice, extrasPrice, amount_rwf")
     .gte("created_at", date)
     .lte("created_at", endDate);
 
@@ -238,6 +243,11 @@ export async function createBookingApi({
   start,
   end,
   durationMinutes,
+  /* The live USD→RWF rate, from useFxRate() in the form. The room is
+     priced in USD and the booking stores what it comes to in RWF, so
+     this is the number that decides what gets frozen — pass it, or the
+     desk freezes a 2025 constant onto today's sale. */
+  rwfPerUsd,
   observations = "",
   numGuests = 1,
   isPaid = false,
@@ -263,6 +273,7 @@ export async function createBookingApi({
     room,
     settings,
     existingBookings: existing,
+    rate: rwfPerUsd,
   });
   if (invalid) throw new Error(invalid);
 

@@ -31,7 +31,7 @@ import {
   durationBounds,
   formatDuration,
   priceForMinutes,
-  usdPerMinuteFromRoom,
+  rwfPerMinuteFromRoom,
   validateAdminBooking,
 } from "../../utils/booking";
 import {
@@ -877,11 +877,13 @@ function SeatStep({
             <>
               {" — "}
               <strong>{formatMenuPrice(price.rwf, "RWF")}</strong>
-              {price.quotedIn === "RWF"
-                ? ` (≈ ${formatCurrency(price.usd)})`
-                : ` (${formatCurrency(price.usd)} exactly, converted at today's rate${
-                    isRateIndicative ? ", indicative" : ""
-                  })`}
+              {/* Every rate is quoted in francs since migration 21, so
+                  the dollar figure is always the approximation. The
+                  branch that said otherwise existed for the monthly
+                  desk, which used to be priced in dollars. */}
+              {` (≈ ${formatCurrency(price.usd)}${
+                isRateIndicative ? ", indicative rate" : ""
+              })`}
             </>
           ) : null}
         </Hint>
@@ -1323,7 +1325,11 @@ function CreateBookingForm({ onCloseModal, prefill = null }) {
   const price = isDeskSale
     ? deskPrice
     : room && hasValidWindow
-      ? priceForMinutes(durationMinutes, usdPerMinuteFromRoom(room), rwfPerUsd)
+      ? priceForMinutes(
+          durationMinutes,
+          rwfPerMinuteFromRoom(room, rwfPerUsd),
+          rwfPerUsd,
+        )
       : null;
 
   function focusField(field) {
@@ -1377,6 +1383,10 @@ function CreateBookingForm({ onCloseModal, prefill = null }) {
               settings: settings ?? {},
               start,
               end,
+              /* The same rate the summary panel just priced with, so what
+                 the desk was shown and what the booking freezes are one
+                 number. */
+              rwfPerUsd,
               observations,
               numGuests: Number(numGuests) || 1,
               isPaid,
@@ -1454,17 +1464,19 @@ function CreateBookingForm({ onCloseModal, prefill = null }) {
             >
               <option value="">Choose a room or space…</option>
               {roomOptions.map((entry) => (
-                /* A shared space has no hourly rate — regularPrice is 0 by
-                   design — so quoting one here would read as "free". Each
-                   option names the price it is actually sold at. */
+                /* A desk and a room are not sold on the same axis, so
+                   each option names the price it is actually sold at: the
+                   day pass for a desk, the hour for a room. Both in
+                   francs, which is what they are priced in. */
                 <option key={entry.id} value={entry.id}>
                   {isSharedSpace(entry)
                     ? `${entry.name} — ${entry.maxCapacity} desks · ${formatMenuPrice(
                         entry.day_rate_rwf ?? 0,
                         "RWF",
                       )}/desk/day`
-                    : `${entry.name} — ${entry.maxCapacity} seats · ${formatCurrency(
-                        entry.regularPrice,
+                    : `${entry.name} — ${entry.maxCapacity} seats · ${formatMenuPrice(
+                        Math.round(rwfPerMinuteFromRoom(entry, rwfPerUsd) * 60),
+                        "RWF",
                       )}/hr`}
                 </option>
               ))}
@@ -1952,21 +1964,15 @@ function CreateBookingForm({ onCloseModal, prefill = null }) {
                 : "Length not set"}
           </dt>
           <dd>
-            {/* RWF leads for a desk, because that is the price on the
-                wall and what the guest hands over; USD leads for a room,
-                which is how its rate is set. */}
+            {/* Francs lead for both products now: it is the price on
+                the wall, what the guest hands over, and what the room is
+                priced at. A meeting room used to lead with dollars,
+                because that was the column its rate was set in. */}
             {price ? (
-              isDeskSale ? (
-                <>
-                  {formatMenuPrice(price.rwf, "RWF")}
-                  <small>{formatCurrency(price.usd)}</small>
-                </>
-              ) : (
-                <>
-                  {formatCurrency(price.usd)}
-                  <small>{price.rwf.toLocaleString()} RWF</small>
-                </>
-              )
+              <>
+                {formatMenuPrice(price.rwf, "RWF")}
+                <small>≈ {formatCurrency(price.usd)}</small>
+              </>
             ) : (
               "—"
             )}

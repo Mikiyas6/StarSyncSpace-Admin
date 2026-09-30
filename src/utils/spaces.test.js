@@ -29,6 +29,11 @@ const shared20 = {
   room_type: "shared_space",
   maxCapacity: 20,
   day_rate_rwf: 30000,
+  /* Both columns, as the live rows look after migration 21: the franc
+     price is what is charged and the retired dollar one is still sitting
+     there. Keeping both on the fixture is what proves the franc column
+     wins rather than merely that it works when it is alone. */
+  month_rate_rwf: 147059,
   month_rate_usd: 100,
   hour_rate_rwf: 5000,
 };
@@ -201,46 +206,45 @@ describe("pricing a pass", () => {
 
   it("charges the month rate per seat per month", () => {
     expect(
-      priceForPass({ room: shared20, passType: PASS_TYPES.MONTH, rate: RATE }).usd,
-    ).toBe(100);
+      priceForPass({ room: shared20, passType: PASS_TYPES.MONTH, rate: RATE }).rwf,
+    ).toBe(147_059);
     expect(
-      priceForPass({ room: shared20, passType: PASS_TYPES.MONTH, seats: 4, rate: RATE }).usd,
-    ).toBe(400);
+      priceForPass({ room: shared20, passType: PASS_TYPES.MONTH, seats: 4, rate: RATE }).rwf,
+    ).toBe(588_236);
   });
 
-  /* Each rate keeps the currency it was quoted in; only the other one
-     moves. This is the distinction that stops a live rate from quietly
-     rewriting a price the business actually set. */
-  it("keeps the quoted currency fixed and converts only the other one", () => {
-    const day = priceForPass({ room: shared20, passType: PASS_TYPES.DAY, rate: RATE });
-    const dayLater = priceForPass({
-      room: shared20,
-      passType: PASS_TYPES.DAY,
-      rate: 1600,
-    });
-    expect(day.quotedIn).toBe("RWF");
-    expect(day.rwf).toBe(dayLater.rwf); // the real price did not move
-    expect(day.usd).not.toBe(dayLater.usd); // the conversion did
+  /* EVERY rate is quoted in francs now, so no pass's real price moves
+     when the currency does — only the dollar figure beside it. The
+     monthly desk used to be the exception, priced in dollars, which
+     meant its franc price changed every morning. */
+  it("keeps every price in francs and converts only the dollar figure", () => {
+    for (const passType of [PASS_TYPES.DAY, PASS_TYPES.MONTH, PASS_TYPES.HOURLY]) {
+      const now = priceForPass({ room: shared20, passType, rate: RATE });
+      const later = priceForPass({ room: shared20, passType, rate: 1600 });
 
-    const month = priceForPass({ room: shared20, passType: PASS_TYPES.MONTH, rate: RATE });
-    const monthLater = priceForPass({
-      room: shared20,
-      passType: PASS_TYPES.MONTH,
-      rate: 1600,
-    });
-    expect(month.quotedIn).toBe("USD");
-    expect(month.usd).toBe(monthLater.usd);
-    expect(month.rwf).not.toBe(monthLater.rwf);
+      expect(now.quotedIn).toBe("RWF");
+      expect(now.rwf).toBe(later.rwf); // the real price did not move
+      expect(now.usd).not.toBe(later.usd); // the conversion did
+    }
   });
 
-  it("converts the monthly desk at the rate it is handed", () => {
+  /* A space the migration has not reached has only the retired dollar
+     column, so it is converted rather than reported as unpriced — which
+     is what makes deploying this in either order safe. */
+  it("falls back to converting the retired month_rate_usd", () => {
+    const preMigration = { ...shared20, month_rate_rwf: null };
     expect(
-      priceForPass({ room: shared20, passType: PASS_TYPES.MONTH, rate: 1500 }).rwf,
+      priceForPass({ room: preMigration, passType: PASS_TYPES.MONTH, rate: 1500 }).rwf,
     ).toBe(150_000);
   });
 
   it("returns null when the room has no rate for that pass", () => {
-    const noRates = { ...shared20, day_rate_rwf: null, month_rate_usd: null };
+    const noRates = {
+      ...shared20,
+      day_rate_rwf: null,
+      month_rate_rwf: null,
+      month_rate_usd: null,
+    };
     expect(priceForPass({ room: noRates, passType: PASS_TYPES.DAY, rate: RATE })).toBeNull();
     expect(
       priceForPass({ room: noRates, passType: PASS_TYPES.MONTH, rate: RATE }),

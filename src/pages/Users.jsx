@@ -29,10 +29,11 @@ function Users() {
       </Row>
 
       <Note>
-        New accounts start as <strong>staff</strong>: bookings, seat sales, and
-        recording snacks sold or removed. Promote somebody to{" "}
-        <strong>admin</strong> to let them set prices, add or remove rooms and
-        menu items, restock, change settings and manage this list.
+        <strong>Staff</strong> do the day: bookings, seat sales, and recording
+        snacks sold or removed. An <strong>admin</strong> can also set prices,
+        add or remove rooms and menu items, restock, change settings and manage
+        this list. Pick a role when you add somebody below, or change theirs
+        here at any time.
       </Note>
 
       <TeamTable />
@@ -40,8 +41,9 @@ function Users() {
       <Row type="vertical">
         <Heading as="h2">Add someone</Heading>
         <Note>
-          This creates a login and gives it the staff role. They can sign in
-          straight away; promote them above if they need more.
+          This creates a login with the password you type here, already
+          confirmed — give them the password and they can sign in straight
+          away. Pick their role below; you can change it above at any time.
         </Note>
         <SignupForm />
       </Row>

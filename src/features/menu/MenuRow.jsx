@@ -21,6 +21,7 @@ import Table from "../../ui/Table";
 import Menus from "../../ui/Menus";
 import Tag from "../../ui/Tag";
 import { useMenuOverview } from "./useMenuOverview";
+import { useAdminRole } from "../authentication/useAdminRole";
 
 const Thumb = styled.div`
   width: 5.6rem;
@@ -85,6 +86,7 @@ function MenuRow({ item, sectionName }) {
   const itemImages = images.filter((img) => img.menu_item_id === item.id);
   const primaryImage = itemImages.find((img) => img.is_primary) ?? itemImages[0];
 
+  const { can } = useAdminRole();
   const { deleteMenuItem, isDeleting } = useDeleteMenuItem();
   const { duplicateMenuItem, isDuplicating } = useDuplicateMenuItem();
   const { toggleFlag, isToggling } = useToggleMenuItemFlag();
@@ -133,108 +135,115 @@ function MenuRow({ item, sectionName }) {
       </Updated>
 
       <div>
-        <Modal>
-          <Menus.Menu>
-            <Menus.Toggle id={item.id} />
-            <Menus.List id={item.id}>
-              <Modal.Open opens="edit-item">
-                <Menus.Button icon={<Pencil />} onClick={() => {}}>
-                  Edit
+        {/* Edit, the three flag toggles, photos and Delete — every entry
+            in this menu writes something, so staff get an empty cell
+            rather than a toggle that opens onto nothing. The row itself
+            still reads: name, section, price and status are exactly what
+            the desk needs when somebody asks what there is. */}
+        {can.manageMenu ? (
+          <Modal>
+            <Menus.Menu>
+              <Menus.Toggle id={item.id} />
+              <Menus.List id={item.id}>
+                <Modal.Open opens="edit-item">
+                  <Menus.Button icon={<Pencil />} onClick={() => {}}>
+                    Edit
+                  </Menus.Button>
+                </Modal.Open>
+
+                <Menus.Button
+                  icon={<Star />}
+                  onClick={() =>
+                    toggleFlag({
+                      id: item.id,
+                      flag: "is_featured",
+                      value: !item.is_featured,
+                    })
+                  }
+                  disabled={isToggling}
+                >
+                  {item.is_featured ? "Remove featured" : "Feature"}
                 </Menus.Button>
-              </Modal.Open>
 
-              <Menus.Button
-                icon={<Star />}
-                onClick={() =>
-                  toggleFlag({
-                    id: item.id,
-                    flag: "is_featured",
-                    value: !item.is_featured,
-                  })
-                }
-                disabled={isToggling}
-              >
-                {item.is_featured ? "Remove featured" : "Feature"}
-              </Menus.Button>
-
-              <Menus.Button
-                icon={<PackageCheck />}
-                onClick={() =>
-                  toggleFlag({
-                    id: item.id,
-                    flag: "is_available",
-                    value: !item.is_available,
-                  })
-                }
-                disabled={isToggling}
-              >
-                {item.is_available ? "Mark sold out" : "Mark available"}
-              </Menus.Button>
-
-              {/* Next to "Mark sold out" because that is the one it
-                  keeps being confused with, and the difference is worth
-                  seeing side by side: sold out leaves the item on the
-                  customer's menu, greyed. This takes it off. */}
-              <Menus.Button
-                icon={item.is_hidden ? <Eye /> : <EyeOff />}
-                onClick={() =>
-                  toggleFlag({
-                    id: item.id,
-                    flag: "is_hidden",
-                    value: !item.is_hidden,
-                  })
-                }
-                disabled={isToggling}
-              >
-                {item.is_hidden ? "Show on menu" : "Hide from menu"}
-              </Menus.Button>
-
-              <Menus.Button
-                icon={<Copy />}
-                onClick={handleDuplicate}
-                disabled={isDuplicating}
-              >
-                Duplicate
-              </Menus.Button>
-
-              <Modal.Open opens="manage-images">
-                <Menus.Button icon={<ImageIcon />} onClick={() => {}}>
-                  Manage images
+                <Menus.Button
+                  icon={<PackageCheck />}
+                  onClick={() =>
+                    toggleFlag({
+                      id: item.id,
+                      flag: "is_available",
+                      value: !item.is_available,
+                    })
+                  }
+                  disabled={isToggling}
+                >
+                  {item.is_available ? "Mark sold out" : "Mark available"}
                 </Menus.Button>
-              </Modal.Open>
 
-              <Modal.Open opens="delete-item">
-                <Menus.Button icon={<Trash2 />}>Delete</Menus.Button>
-              </Modal.Open>
-            </Menus.List>
-          </Menus.Menu>
+                {/* Next to "Mark sold out" because that is the one it
+                    keeps being confused with, and the difference is worth
+                    seeing side by side: sold out leaves the item on the
+                    customer's menu, greyed. This takes it off. */}
+                <Menus.Button
+                  icon={item.is_hidden ? <Eye /> : <EyeOff />}
+                  onClick={() =>
+                    toggleFlag({
+                      id: item.id,
+                      flag: "is_hidden",
+                      value: !item.is_hidden,
+                    })
+                  }
+                  disabled={isToggling}
+                >
+                  {item.is_hidden ? "Show on menu" : "Hide from menu"}
+                </Menus.Button>
 
-          <Modal.Window name="edit-item">
-            <CreateMenuItemForm itemToEdit={itemWithImages} />
-          </Modal.Window>
+                <Menus.Button
+                  icon={<Copy />}
+                  onClick={handleDuplicate}
+                  disabled={isDuplicating}
+                >
+                  Duplicate
+                </Menus.Button>
 
-          <Modal.Window name="manage-images">
-            <ExistingImagesManager menuItemId={item.id} />
-          </Modal.Window>
+                <Modal.Open opens="manage-images">
+                  <Menus.Button icon={<ImageIcon />} onClick={() => {}}>
+                    Manage images
+                  </Menus.Button>
+                </Modal.Open>
 
-          <Modal.Window name="delete-item">
-            {/* Not "permanently" — that is only true for an item that
-                has never traded. One that has is archived instead, and a
-                dialog that overstates what it does gets dismissed
-                unread.
+                <Modal.Open opens="delete-item">
+                  <Menus.Button icon={<Trash2 />}>Delete</Menus.Button>
+                </Modal.Open>
+              </Menus.List>
+            </Menus.Menu>
 
-                It also names Hide, because this dialog is where people
-                discover they wanted that instead. */}
-            <ConfirmDelete
-              resourceName={`"${item.name}"`}
-              title={`Remove "${item.name}"`}
-              description={`Take "${item.name}" off the menu for good and out of every room's stock list? Its sales history is kept either way. Any room that still holds stock of it has to be cleared first. To take it off the customer menu and keep everything as it is, close this and choose "Hide from menu".`}
-              confirmLabel="Remove"
-              disabled={isDeleting}
-              onConfirm={() => deleteMenuItem(item.id)}
-            />
-          </Modal.Window>
-        </Modal>
+            <Modal.Window name="edit-item">
+              <CreateMenuItemForm itemToEdit={itemWithImages} />
+            </Modal.Window>
+
+            <Modal.Window name="manage-images">
+              <ExistingImagesManager menuItemId={item.id} />
+            </Modal.Window>
+
+            <Modal.Window name="delete-item">
+              {/* Not "permanently" — that is only true for an item that
+                  has never traded. One that has is archived instead, and a
+                  dialog that overstates what it does gets dismissed
+                  unread.
+
+                  It also names Hide, because this dialog is where people
+                  discover they wanted that instead. */}
+              <ConfirmDelete
+                resourceName={`"${item.name}"`}
+                title={`Remove "${item.name}"`}
+                description={`Take "${item.name}" off the menu for good and out of every room's stock list? Its sales history is kept either way. Any room that still holds stock of it has to be cleared first. To take it off the customer menu and keep everything as it is, close this and choose "Hide from menu".`}
+                confirmLabel="Remove"
+                disabled={isDeleting}
+                onConfirm={() => deleteMenuItem(item.id)}
+              />
+            </Modal.Window>
+          </Modal>
+        ) : null}
       </div>
     </Table.Row>
   );

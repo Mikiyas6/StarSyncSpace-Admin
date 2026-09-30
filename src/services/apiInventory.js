@@ -509,6 +509,8 @@ function explainStockError(error, reason) {
       return "Only an admin can add stock. Ask an admin to restock this.";
     if (reason === "correction")
       return "Only an admin can correct a count.";
+    if (reason === "removal" || reason === "waste")
+      return "Only an admin can take stock out without a sale. Record it as a sale, or ask an admin to write it off.";
     return "You do not have permission to do that.";
   }
 

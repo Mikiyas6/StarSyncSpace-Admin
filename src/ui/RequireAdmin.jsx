@@ -44,9 +44,31 @@ const Denied = styled.div`
    a dead end into an errand.
    ------------------------------------------------------------------ */
 function RequireAdmin({ children, what = "This page" }) {
-  const { isAdmin, isLoading, isDeactivated } = useAdminRole();
+  const { isAdmin, isLoading, isDeactivated, hasNoRole } = useAdminRole();
 
   if (isLoading) return <Spinner />;
+
+  /* A login with no row on the team at all. RLS refuses it everything,
+     so drawing the page would be handing somebody a screen of controls
+     that each fail on their own. It is worth distinguishing from
+     "revoked" below: revoking is something an admin did on purpose and
+     can undo from the team page, whereas this is a login that was
+     orphaned — usually by deleting the person from `admins` in the
+     Supabase table editor, which does not delete their login. Adding
+     them again on the team page reclaims it. */
+  if (hasNoRole)
+    return (
+      <Denied>
+        <ShieldAlert />
+        <Heading as="h2">This account is not on the team</Heading>
+        <p>
+          The login works, but it has no role, so there is nothing it can read
+          or change. An admin can put it back by adding the same email address
+          on the team page — that reclaims this login rather than making a
+          second one.
+        </p>
+      </Denied>
+    );
 
   if (isDeactivated)
     return (

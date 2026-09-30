@@ -17,13 +17,31 @@
    one taken on the site.
    ------------------------------------------------------------------ */
 
+import { rwfForUsd, usdForRwf } from "./fx";
+
 export const MINUTE_MS = 60 * 1000;
 export const FULL_DAY_MINUTES = 24 * 60;
 export const SLOT_STEP_MINUTES = 15;
 export const DEFAULT_BUFFER_MINUTES = 15;
 
-// Kept in sync with RWF_PER_USD in the client's availability.js.
+/* Kept in sync with RWF_PER_USD in the client's availability.js.
+
+   A FALLBACK, not the rate. Everything that prices a real booking is
+   handed the live rate from useFxRate(); this is only what to use when
+   nobody passed one, and every RWF figure produced from it is by
+   definition out of date. */
 export const RWF_PER_USD = 1470.59;
+
+/* The last-resort per-minute price, in francs: 30,000 RWF an hour, which
+   is what a meeting room costs. Mirrors PRICE_PER_MINUTE_RWF in the
+   client's availability.js.
+
+   Only ever a display fallback for a "from" figure with no priced room
+   to read — see fromRwfPerMinute in spaces.js. It must NOT be used to
+   price a real booking: rwfPerMinuteFromRoom returns 0 for an unpriced
+   room on purpose, so a room nobody has given a rate cannot be quietly
+   sold at a guess. */
+export const PRICE_PER_MINUTE_RWF = 500;
 
 /* The whole status vocabulary in one place, with who is allowed to set
    each one. `auto` statuses are written by the system; `manual` ones are
@@ -109,17 +127,53 @@ export function statusLabel(status) {
 
 /* ----------------------------- money ----------------------------- */
 
-// rooms.regularPrice is the room's HOURLY rate in USD, as the admin types
-// it. Every total is per-minute, so this is the one place it is divided.
-export function usdPerMinuteFromRoom(room) {
-  const hourly = Number(room?.regularPrice);
-  return hourly > 0 ? hourly / 60 : 0;
+/* THE PRICE IS IN FRANCS.
+
+   rooms.hour_rate_rwf is the room's HOURLY rate in RWF, as the admin
+   types it. For a meeting room that buys the whole room for an hour; for
+   a shared space it buys one seat (see spaces.js). Every total is
+   per-minute, so this is the one place it is divided by sixty.
+
+   It used to be rooms."regularPrice", in dollars, with every franc a
+   customer saw derived from it at whatever the rate happened to be.
+   Migration 21 inverted that: the franc figure is the price, the dollar
+   figure is the conversion, and "regularPrice" is retired — read here
+   only as a fallback for a room the migration has not reached, which is
+   what makes deploying this in either order safe.
+
+   `rate` is consulted ONLY for that fallback. A room with hour_rate_rwf
+   set is priced without any exchange rate at all, which is the whole
+   point: its price does not move when the currency does. */
+export function rwfPerMinuteFromRoom(room, rate = RWF_PER_USD) {
+  const hourlyRwf = Number(room?.hour_rate_rwf);
+  if (Number.isFinite(hourlyRwf) && hourlyRwf > 0) return hourlyRwf / 60;
+
+  const hourlyUsd = Number(room?.regularPrice);
+  if (Number.isFinite(hourlyUsd) && hourlyUsd > 0)
+    return rwfForUsd(hourlyUsd, rate) / 60;
+
+  return 0;
 }
 
-export function priceForMinutes(minutes, usdPerMinute) {
-  const rate = Number(usdPerMinute) || 0;
-  const usd = Math.round(rate * minutes * 100) / 100;
-  return { usd, rwf: Math.round(usd * RWF_PER_USD) };
+/* `rwfPerUsd` is the LIVE exchange rate; `rwfPerMinute` is the room's
+   own price. Two different rates, which is why they are separate
+   arguments.
+
+   The FRANC total is the price. The DOLLAR total is what it converts to
+   right now — what a card checkout charges, and what gets frozen onto
+   the booking beside the francs as the conversion that was true at the
+   moment of sale.
+
+   The exchange rate used to be dropped on the floor here: this took a
+   USD per-minute rate and converted with a hardcoded 1470.59 while
+   CreateBookingForm was already handing the live rate in as a third
+   argument. That is how a two-hour booking came to carry 60,000 RWF —
+   40.80 USD times a rate from 2025. With the price in francs the
+   exchange rate cannot get into it at all. */
+export function priceForMinutes(minutes, rwfPerMinute, rwfPerUsd = RWF_PER_USD) {
+  const perMinute = Number(rwfPerMinute) || 0;
+  const rwf = Math.round(perMinute * minutes);
+  return { rwf, usd: usdForRwf(rwf, rwfPerUsd), quotedIn: "RWF" };
 }
 
 /* ---------------------------- the clock -------------------------- */
@@ -268,6 +322,11 @@ export function validateAdminBooking({
   settings = {},
   existingBookings = [],
   ignoreBookingId = null,
+  /* The live USD→RWF rate, so the RWF total frozen onto the booking is
+     today's conversion of the room's USD rate and not a stale constant.
+     Defaulted rather than required so the rule-checking half of this
+     validator stays callable from a test with no rate to hand. */
+  rate = RWF_PER_USD,
   now = new Date(),
 }) {
   /* Every rejection carries the `field` it belongs to, so the form can
@@ -325,8 +384,8 @@ export function validateAdminBooking({
       field: "start",
     };
 
-  const usdPerMinute = usdPerMinuteFromRoom(room);
-  const { usd, rwf } = priceForMinutes(minutes, usdPerMinute);
+  const rwfPerMinute = rwfPerMinuteFromRoom(room, rate);
+  const { usd, rwf } = priceForMinutes(minutes, rwfPerMinute, rate);
 
   return {
     value: {

@@ -87,6 +87,11 @@ const ROOM_COLUMNS = {
   discount: "number",
   hour_rate_rwf: "number",
   day_rate_rwf: "number",
+  /* The franc rate is the price of record (migration 21).
+     month_rate_usd is still written so a room edited in the admin does
+     not leave the retired column contradicting the live one while both
+     apps are mid-deploy. */
+  month_rate_rwf: "number",
   month_rate_usd: "number",
   is_archived: "boolean",
   discount_valid_from: "raw",

@@ -4,7 +4,7 @@ import { format, isToday } from "date-fns";
 import Tag from "../../ui/Tag";
 import Table from "../../ui/Table";
 
-import { formatCurrency } from "../../utils/helpers";
+import { formatRwfAmount } from "../../utils/helpers";
 import { formatDistanceFromNow } from "../../utils/helpers";
 import Menus from "../../ui/Menus";
 import {
@@ -66,6 +66,7 @@ function BookingRow({
     numHours,
     numGuests,
     totalPrice,
+    amount_rwf,
     status,
     isPaid,
     guests,
@@ -127,7 +128,11 @@ function BookingRow({
           an invalid custom property, i.e. an unstyled tag. */}
       <Tag type={statusTag(status)}>{statusLabel(status)}</Tag>
 
-      <Amount>{formatCurrency(totalPrice)}</Amount>
+      {/* What the booking cost, in francs. amount_rwf is the price of
+          record since migration 21; the retired USD "totalPrice" is
+          only the conversion frozen at the moment of sale, and this
+          column used to show that instead. */}
+      <Amount>{formatRwfAmount(amount_rwf ?? 0)}</Amount>
       <Modal>
         <Menus.Menu>
           <Menus.Toggle id={bookingId} />

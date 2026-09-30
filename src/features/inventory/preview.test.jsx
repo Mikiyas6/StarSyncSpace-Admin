@@ -123,11 +123,22 @@ vi.mock("../rooms/useRooms", () => ({
   useRooms: () => ({ rooms: ROOMS, isLoading: false }),
 }));
 
+/* The whole capability map, not just the two this preview reads today.
+   A partial mock silently answers `undefined` for anything added later,
+   which reads as "denied" — so the admin preview would quietly stop
+   showing controls an admin actually has, and the picture would be
+   wrong in the one direction nobody checks. */
 vi.mock("../authentication/useAdminRole", () => ({
   useAdminRole: () => ({
     isAdmin: true,
     role: "admin",
-    can: { manageStock: true, manageMenu: true },
+    can: {
+      manageStock: true,
+      manageMenu: true,
+      removeStock: true,
+      transferStock: true,
+      sellStock: true,
+    },
   }),
 }));
 

@@ -9,7 +9,11 @@ import {
 
 import DataItem from "../../ui/DataItem";
 
-import { formatDistanceFromNow, formatCurrency } from "../../utils/helpers";
+import {
+  formatDistanceFromNow,
+  formatCurrency,
+  formatRwfAmount,
+} from "../../utils/helpers";
 import { bookingMinutes, formatDuration } from "../../utils/booking";
 
 const StyledBookingDataBox = styled.section`
@@ -110,6 +114,7 @@ function BookingDataBox({ booking }) {
     numGuests,
     cabinPrice,
     totalPrice,
+    amount_rwf,
     observations,
     isPaid,
     // No country/countryFlag: the guests table is (id, created_at,
@@ -160,10 +165,13 @@ function BookingDataBox({ booking }) {
 
         <Price isPaid={isPaid}>
           <DataItem icon={<CircleDollarSign />} label={`Total price`}>
-            {formatCurrency(totalPrice)}
-            {` (${formatCurrency(cabinPrice)} room × ${formatDuration(
-              bookingMinutes(booking),
-            ).toLowerCase()})`}
+            {/* Francs lead: that is what was charged. The dollar
+                figure beside it is the conversion frozen at the moment
+                of sale, which is what a card refund would be issued in
+                — worth keeping visible, but it is not the price. */}
+            {formatRwfAmount(amount_rwf ?? 0)}
+            {` for ${formatDuration(bookingMinutes(booking)).toLowerCase()}`}
+            {Number(totalPrice) > 0 ? ` · ≈ ${formatCurrency(totalPrice)}` : ""}
           </DataItem>
 
           <p>{isPaid ? "Paid" : "Payment pending"}</p>
